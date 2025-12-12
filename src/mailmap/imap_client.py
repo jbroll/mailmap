@@ -2,6 +2,7 @@
 
 import asyncio
 import email
+import email.message
 from dataclasses import dataclass
 from email.header import decode_header
 from typing import AsyncIterator, Callable

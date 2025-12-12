@@ -323,6 +323,67 @@ async def run_thunderbird_import(config: Config, db: Database) -> None:
         db.close()
 
 
+def list_classifications(db: Database, limit: int = 50) -> None:
+    """List classification results from the database."""
+    db.connect()
+    db.init_schema()
+    try:
+        rows = db.conn.execute(
+            """
+            SELECT message_id, folder_id, subject, from_addr, classification, confidence, processed_at
+            FROM emails
+            WHERE classification IS NOT NULL
+            ORDER BY processed_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+        if not rows:
+            print("No classification results found.")
+            return
+
+        print(f"{'Subject':<40} {'From':<25} {'Original':<15} {'Predicted':<15} {'Conf':<6}")
+        print("-" * 105)
+
+        for row in rows:
+            subject = (row["subject"] or "")[:38]
+            from_addr = (row["from_addr"] or "")[:23]
+            folder = (row["folder_id"] or "")[:13]
+            classification = (row["classification"] or "")[:13]
+            confidence = row["confidence"] or 0
+
+            print(f"{subject:<40} {from_addr:<25} {folder:<15} {classification:<15} {confidence:.2f}")
+
+        print(f"\nTotal: {len(rows)} results (showing up to {limit})")
+    finally:
+        db.close()
+
+
+def list_folders_cmd(db: Database) -> None:
+    """List folders and their descriptions."""
+    db.connect()
+    db.init_schema()
+    try:
+        folders = db.get_all_folders()
+
+        if not folders:
+            print("No folders found.")
+            return
+
+        print(f"{'Folder':<30} {'Description':<70}")
+        print("-" * 102)
+
+        for folder in folders:
+            name = (folder.folder_id or "")[:28]
+            desc = (folder.description or "No description")[:68]
+            print(f"{name:<30} {desc:<70}")
+
+        print(f"\nTotal: {len(folders)} folders")
+    finally:
+        db.close()
+
+
 def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
     """Apply command-line overrides to config."""
     if args.db_path:
@@ -376,6 +437,16 @@ def main() -> None:
         "--reset-db",
         action="store_true",
         help="Delete the database file and exit (for clean slate iteration)",
+    )
+    mode_group.add_argument(
+        "--list",
+        action="store_true",
+        help="List classification results from the database",
+    )
+    mode_group.add_argument(
+        "--list-folders",
+        action="store_true",
+        help="List folders and their descriptions",
     )
 
     # Config file
@@ -440,7 +511,11 @@ def main() -> None:
 
     db = Database(config.database.path)
 
-    if args.mcp:
+    if args.list:
+        list_classifications(db)
+    elif args.list_folders:
+        list_folders_cmd(db)
+    elif args.mcp:
         asyncio.run(run_mcp(config, db))
     elif args.thunderbird:
         asyncio.run(run_thunderbird_import(config, db))
