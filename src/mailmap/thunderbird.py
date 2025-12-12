@@ -21,8 +21,11 @@ class ThunderbirdEmail:
 
 def find_thunderbird_profile(base_path: Path | None = None) -> Path | None:
     """Find the default Thunderbird profile directory."""
-    if base_path and base_path.exists():
-        return base_path
+    if base_path is not None:
+        # Explicit path provided - use it or fail, don't fall back to auto-detection
+        if base_path.exists():
+            return base_path
+        return None
 
     # Default Thunderbird locations
     candidates = [

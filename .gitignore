@@ -31,6 +31,12 @@ ENV/
 *.swp
 *.swo
 
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
 # Project specific
 config.toml
 *.db

@@ -9,8 +9,8 @@ Mailmap is an email classification system that monitors IMAP servers and classif
 ## Build and Run
 
 ```bash
-# Install dependencies
-pip install -e .
+# Install dependencies (with dev tools for testing)
+pip install -e ".[dev]"
 
 # Copy and configure
 cp config.example.toml config.toml
@@ -51,6 +51,22 @@ Override config file values from command line:
 Example iteration workflow:
 ```bash
 mailmap --reset-db && mailmap --thunderbird --import-limit 50 --ollama-model qwen2.5:3b
+```
+
+## Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_database.py
+
+# Run specific test
+pytest tests/test_database.py::TestFolderOperations::test_upsert_and_get_folder
+
+# Run with verbose output
+pytest -v
 ```
 
 ## Architecture

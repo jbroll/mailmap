@@ -35,6 +35,7 @@ class OllamaClient:
     async def __aexit__(self, *args) -> None:
         if self._client:
             await self._client.aclose()
+            self._client = None
 
     @property
     def client(self) -> httpx.AsyncClient:
