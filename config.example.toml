@@ -1,0 +1,31 @@
+# Mailmap Configuration Example
+# Copy this file to config.toml and update with your settings
+
+[imap]
+host = "imap.example.com"
+port = 993
+username = "your-email@example.com"
+password = "your-password"
+use_ssl = true
+# Folders to monitor with IDLE (real-time notifications)
+idle_folders = ["INBOX"]
+# Polling interval for other folders (in seconds)
+poll_interval_seconds = 300
+
+[ollama]
+base_url = "http://localhost:11434"
+model = "qwen2.5:7b"
+timeout_seconds = 120
+
+[database]
+path = "mailmap.db"
+
+[thunderbird]
+# Path to Thunderbird profile (auto-detected if not specified)
+# profile_path = "/home/user/.thunderbird/xxxxxxxx.default"
+# Filter to specific IMAP server (optional)
+# server_filter = "imap.gmail.com"
+# Number of emails to sample for generating folder descriptions
+samples_per_folder = 20
+# Max emails to import per folder (comment out for unlimited)
+# import_limit = 1000
