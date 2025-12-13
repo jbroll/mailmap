@@ -43,6 +43,99 @@ const actionHandlers = {
     return { folders: allFolders };
   },
 
+  listMessages: async (params) => {
+    const { accountId, path, limit = 10 } = params;
+
+    // Find the folder
+    const account = await browser.accounts.get(accountId);
+    if (!account) {
+      throw new Error(`Account not found: ${accountId}`);
+    }
+
+    const folder = findFolderInTree(account.folders, path);
+    if (!folder) {
+      throw new Error(`Folder not found: ${path}`);
+    }
+
+    // Query messages in folder
+    const page = await browser.messages.list(folder);
+    const messages = [];
+
+    for (const msg of page.messages.slice(0, limit)) {
+      messages.push({
+        id: msg.id,
+        subject: msg.subject,
+        author: msg.author,
+        date: msg.date,
+      });
+    }
+
+    return { messages };
+  },
+
+  createFolder: async (params) => {
+    const { accountId, parentPath, name } = params;
+
+    const account = await browser.accounts.get(accountId);
+    if (!account) {
+      throw new Error(`Account not found: ${accountId}`);
+    }
+
+    let parentFolder;
+    if (parentPath) {
+      parentFolder = findFolderInTree(account.folders, parentPath);
+      if (!parentFolder) {
+        throw new Error(`Parent folder not found: ${parentPath}`);
+      }
+    } else {
+      // Create at root level - use account's root folders
+      parentFolder = account;
+    }
+
+    const newFolder = await browser.folders.create(parentFolder, name);
+    return {
+      path: newFolder.path,
+      name: newFolder.name,
+    };
+  },
+
+  renameFolder: async (params) => {
+    const { accountId, path, newName } = params;
+
+    const account = await browser.accounts.get(accountId);
+    if (!account) {
+      throw new Error(`Account not found: ${accountId}`);
+    }
+
+    const folder = findFolderInTree(account.folders, path);
+    if (!folder) {
+      throw new Error(`Folder not found: ${path}`);
+    }
+
+    const renamed = await browser.folders.rename(folder, newName);
+    return {
+      path: renamed.path,
+      name: renamed.name,
+    };
+  },
+
+  deleteFolder: async (params) => {
+    const { accountId, path } = params;
+
+    const account = await browser.accounts.get(accountId);
+    if (!account) {
+      throw new Error(`Account not found: ${accountId}`);
+    }
+
+    const folder = findFolderInTree(account.folders, path);
+    if (!folder) {
+      throw new Error(`Folder not found: ${path}`);
+    }
+
+    await browser.folders.delete(folder);
+    return { deleted: path };
+  },
+
   getMessage: async (params) => {
     const { messageId } = params;
     const message = await browser.messages.get(messageId);

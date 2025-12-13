@@ -13,8 +13,11 @@
   "permissions": [
     "messagesRead",
     "messagesMove",
+    "messagesDelete",
+    "messagesUpdate",
     "messagesTags",
-    "accountsRead"
+    "accountsRead",
+    "accountsFolders"
   ],
   "background": {
     "scripts": ["protocol.js", "background.js"]
