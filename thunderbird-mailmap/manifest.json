@@ -1,0 +1,25 @@
+{
+  "manifest_version": 2,
+  "name": "Mailmap Connector",
+  "version": "0.1.0",
+  "description": "Connects Thunderbird to mailmap for AI-powered email classification",
+  "author": "mailmap",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "mailmap@localhost",
+      "strict_min_version": "115.0"
+    }
+  },
+  "permissions": [
+    "messagesRead",
+    "messagesMove",
+    "messagesTags",
+    "accountsRead"
+  ],
+  "background": {
+    "scripts": ["protocol.js", "background.js"]
+  },
+  "icons": {
+    "48": "icons/mailmap-48.png"
+  }
+}

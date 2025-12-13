@@ -1,0 +1,210 @@
+"""WebSocket server for Thunderbird MailExtension communication."""
+
+import asyncio
+import json
+import logging
+import uuid
+from typing import Any, Callable, Awaitable
+
+import websockets
+from websockets.server import WebSocketServerProtocol
+
+from .config import WebSocketConfig
+from .database import Database
+from .protocol import Action, Event, Request, Response, ServerEvent, parse_message
+
+logger = logging.getLogger("mailmap.websocket")
+
+
+class WebSocketServer:
+    """WebSocket server that manages MailExtension connections."""
+
+    def __init__(self, config: WebSocketConfig, db: Database):
+        self.config = config
+        self.db = db
+        self._clients: dict[str, WebSocketServerProtocol] = {}
+        self._pending_requests: dict[str, asyncio.Future] = {}
+        self._server = None
+        self._running = False
+
+    async def start(self) -> None:
+        """Start the WebSocket server."""
+        self._running = True
+        logger.info(f"Starting WebSocket server on {self.config.host}:{self.config.port}")
+
+        self._server = await websockets.serve(
+            self._handle_client,
+            self.config.host,
+            self.config.port,
+        )
+
+        # Keep running until stopped
+        while self._running:
+            await asyncio.sleep(1)
+
+    async def stop(self) -> None:
+        """Stop the WebSocket server."""
+        self._running = False
+        if self._server:
+            self._server.close()
+            await self._server.wait_closed()
+            logger.info("WebSocket server stopped")
+
+    async def _handle_client(self, websocket: WebSocketServerProtocol) -> None:
+        """Handle a client connection."""
+        client_id = str(uuid.uuid4())[:8]
+        self._clients[client_id] = websocket
+        logger.info(f"Client {client_id} connected from {websocket.remote_address}")
+
+        # Send connected event
+        await self._send_event(websocket, Event.CONNECTED, {"clientId": client_id})
+
+        try:
+            async for message in websocket:
+                await self._handle_message(client_id, websocket, message)
+        except websockets.ConnectionClosed:
+            logger.info(f"Client {client_id} disconnected")
+        finally:
+            del self._clients[client_id]
+
+    async def _handle_message(
+        self, client_id: str, websocket: WebSocketServerProtocol, raw: str
+    ) -> None:
+        """Handle an incoming message from a client."""
+        parsed = parse_message(raw)
+
+        if isinstance(parsed, Response):
+            # Response to a request we sent
+            future = self._pending_requests.pop(parsed.id, None)
+            if future and not future.done():
+                future.set_result(parsed)
+            return
+
+        if isinstance(parsed, Request):
+            # Request from extension (queries)
+            response = await self._handle_request(parsed)
+            await websocket.send(response.to_json())
+            return
+
+        logger.warning(f"Unknown message from {client_id}: {raw[:100]}")
+
+    async def _handle_request(self, request: Request) -> Response:
+        """Handle a request from the extension."""
+        try:
+            if request.action == Action.PING.value:
+                return Response.success(request.id, {"pong": True})
+
+            elif request.action == "getFolders":
+                folders = self.db.get_folder_descriptions()
+                return Response.success(request.id, {"folders": folders})
+
+            elif request.action == "getClassifications":
+                limit = request.params.get("limit", 50)
+                classifications = self._get_recent_classifications(limit)
+                return Response.success(request.id, {"classifications": classifications})
+
+            elif request.action == "getStats":
+                stats = self.db.get_classification_counts()
+                return Response.success(request.id, {"stats": stats})
+
+            else:
+                return Response.failure(request.id, f"Unknown action: {request.action}")
+
+        except Exception as e:
+            logger.error(f"Error handling request {request.id}: {e}")
+            return Response.failure(request.id, str(e))
+
+    def _get_recent_classifications(self, limit: int) -> list[dict]:
+        """Get recent classifications from database."""
+        rows = self.db.conn.execute(
+            """
+            SELECT message_id, subject, from_addr, classification, confidence, processed_at
+            FROM emails
+            WHERE classification IS NOT NULL
+            ORDER BY processed_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+        return [
+            {
+                "messageId": row["message_id"],
+                "subject": row["subject"],
+                "from": row["from_addr"],
+                "folder": row["classification"],
+                "confidence": row["confidence"],
+                "processedAt": row["processed_at"],
+            }
+            for row in rows
+        ]
+
+    async def send_request(
+        self,
+        action: Action,
+        params: dict[str, Any],
+        timeout: float = 30.0,
+    ) -> Response | None:
+        """Send a request to all connected clients and wait for first response."""
+        if not self._clients:
+            logger.warning("No clients connected")
+            return None
+
+        request_id = str(uuid.uuid4())
+        request = Request(id=request_id, action=action.value, params=params)
+
+        future: asyncio.Future[Response] = asyncio.get_event_loop().create_future()
+        self._pending_requests[request_id] = future
+
+        # Send to first available client
+        client_id, websocket = next(iter(self._clients.items()))
+        try:
+            await websocket.send(request.to_json())
+            logger.debug(f"Sent {action.value} request to {client_id}")
+
+            return await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"Request {request_id} timed out")
+            self._pending_requests.pop(request_id, None)
+            return None
+        except Exception as e:
+            logger.error(f"Error sending request: {e}")
+            self._pending_requests.pop(request_id, None)
+            return None
+
+    async def broadcast_event(self, event: Event, data: dict[str, Any]) -> None:
+        """Broadcast an event to all connected clients."""
+        if not self._clients:
+            return
+
+        server_event = ServerEvent(event=event.value, data=data)
+        message = server_event.to_json()
+
+        for client_id, websocket in list(self._clients.items()):
+            try:
+                await websocket.send(message)
+            except Exception as e:
+                logger.warning(f"Failed to send event to {client_id}: {e}")
+
+    async def _send_event(
+        self, websocket: WebSocketServerProtocol, event: Event, data: dict[str, Any]
+    ) -> None:
+        """Send an event to a specific client."""
+        server_event = ServerEvent(event=event.value, data=data)
+        await websocket.send(server_event.to_json())
+
+    @property
+    def client_count(self) -> int:
+        """Return number of connected clients."""
+        return len(self._clients)
+
+    @property
+    def is_connected(self) -> bool:
+        """Return True if any clients are connected."""
+        return len(self._clients) > 0
+
+
+async def run_websocket_server(config: WebSocketConfig, db: Database) -> None:
+    """Run the WebSocket server (for use in asyncio.gather)."""
+    server = WebSocketServer(config, db)
+    await server.start()

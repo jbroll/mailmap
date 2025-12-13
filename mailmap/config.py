@@ -49,9 +49,19 @@ class DatabaseConfig:
 class ThunderbirdConfig:
     profile_path: str | None = None  # Auto-detect if not specified
     server_filter: str | None = None  # Filter to specific IMAP server
+    folder_filter: str | None = None  # Filter to specific folder (e.g., INBOX)
     samples_per_folder: int = 20  # Number of emails to sample for descriptions
-    import_limit: int | None = None  # Max emails to import per folder (None = all)
-    init_sample_limit: int = 100  # Max emails to sample for --init-folders
+    import_limit: int | float | None = None  # Max emails: int=count, float(0-1)=percentage
+    init_sample_limit: int | float = 100  # Max emails: int=count, float(0-1)=percentage
+    random_sample: bool = False  # Use random sampling instead of sequential
+
+
+@dataclass
+class WebSocketConfig:
+    """WebSocket server configuration for Thunderbird MailExtension communication."""
+    enabled: bool = False
+    host: str = "127.0.0.1"  # Localhost only for security
+    port: int = 8765
 
 
 @dataclass
@@ -60,6 +70,7 @@ class Config:
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     thunderbird: ThunderbirdConfig = field(default_factory=ThunderbirdConfig)
+    websocket: WebSocketConfig = field(default_factory=WebSocketConfig)
 
 
 def load_config(path: str | Path) -> Config:
@@ -95,9 +106,18 @@ def load_config(path: str | Path) -> Config:
     tb_config = ThunderbirdConfig(
         profile_path=tb_data.get("profile_path"),
         server_filter=tb_data.get("server_filter"),
+        folder_filter=tb_data.get("folder_filter"),
         samples_per_folder=tb_data.get("samples_per_folder", 20),
         import_limit=tb_data.get("import_limit"),
         init_sample_limit=tb_data.get("init_sample_limit", 100),
+        random_sample=tb_data.get("random_sample", False),
+    )
+
+    ws_data = data.get("websocket", {})
+    ws_config = WebSocketConfig(
+        enabled=ws_data.get("enabled", False),
+        host=ws_data.get("host", "127.0.0.1"),
+        port=ws_data.get("port", 8765),
     )
 
     return Config(
@@ -105,4 +125,5 @@ def load_config(path: str | Path) -> Config:
         ollama=ollama_config,
         database=db_config,
         thunderbird=tb_config,
+        websocket=ws_config,
     )

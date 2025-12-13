@@ -31,3 +31,11 @@ samples_per_folder = 20
 # import_limit = 1000
 # Max emails to sample for --init-folders mode
 init_sample_limit = 100
+
+[websocket]
+# Enable WebSocket server for Thunderbird MailExtension communication
+enabled = false
+# Host to bind to (127.0.0.1 for localhost only)
+host = "127.0.0.1"
+# Port for WebSocket server
+port = 8765
