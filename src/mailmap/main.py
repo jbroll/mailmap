@@ -7,11 +7,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from .config import load_config, Config
+from .config import Config, load_config
 from .database import Database, Email, Folder
-from .imap_client import ImapMailbox, ImapListener, EmailMessage
+from .imap_client import EmailMessage, ImapListener, ImapMailbox
 from .llm import OllamaClient, SuggestedFolder
-from .mcp_server import run_mcp_server
 from .thunderbird import ThunderbirdReader
 
 logging.basicConfig(
@@ -181,16 +180,6 @@ async def run_daemon(config: Config, db: Database) -> None:
         await generate_folder_descriptions(config, db)
         logger.info("Starting email listener...")
         await run_listener(config, db)
-    finally:
-        db.close()
-
-
-async def run_mcp(config: Config, db: Database) -> None:
-    """Run only the MCP server (for use with external MCP clients)."""
-    db.connect()
-    db.init_schema()
-    try:
-        await run_mcp_server(config, db)
     finally:
         db.close()
 
@@ -533,11 +522,6 @@ def main() -> None:
     # Mode selection
     mode_group = parser.add_argument_group("modes")
     mode_group.add_argument(
-        "--mcp",
-        action="store_true",
-        help="Run as MCP server only (for external MCP clients)",
-    )
-    mode_group.add_argument(
         "--sync-folders",
         action="store_true",
         help="Sync folders and generate descriptions, then exit",
@@ -641,8 +625,6 @@ def main() -> None:
         list_folders_cmd(db)
     elif args.init_folders:
         asyncio.run(run_init_folders(config, db))
-    elif args.mcp:
-        asyncio.run(run_mcp(config, db))
     elif args.thunderbird:
         asyncio.run(run_thunderbird_import(config, db))
     elif args.sync_folders:

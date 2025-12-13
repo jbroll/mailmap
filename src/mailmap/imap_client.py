@@ -1,11 +1,12 @@
 """IMAP client for email monitoring."""
 
 import asyncio
+import contextlib
 import email
 import email.message
+from collections.abc import Callable
 from dataclasses import dataclass
 from email.header import decode_header
-from typing import Callable
 
 from imapclient import IMAPClient
 
@@ -78,10 +79,8 @@ class ImapMailbox:
     def disconnect(self) -> None:
         """Disconnect from the IMAP server."""
         if self._client:
-            try:
+            with contextlib.suppress(Exception):
                 self._client.logout()
-            except Exception:
-                pass
             self._client = None
 
     @property

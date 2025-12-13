@@ -2,11 +2,11 @@
 
 import json
 import logging
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 import httpx
-from dataclasses import dataclass
 
 from .config import OllamaConfig
 from .content import extract_email_summary

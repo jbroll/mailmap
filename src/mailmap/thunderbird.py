@@ -2,9 +2,9 @@
 
 import logging
 import mailbox
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 from .imap_client import decode_mime_header, extract_body
 
