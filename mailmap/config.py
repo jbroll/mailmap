@@ -43,6 +43,7 @@ class OllamaConfig:
 @dataclass
 class DatabaseConfig:
     path: str = "mailmap.db"
+    categories_file: str = "categories.txt"
 
 
 @dataclass
@@ -64,6 +65,63 @@ class WebSocketConfig:
     port: int = 9753
 
 
+# Default spam rules covering common spam filters
+DEFAULT_SPAM_RULES = [
+    # Microsoft/Office 365
+    "X-MS-Exchange-Organization-SCL >= 5",
+    "X-Microsoft-Antispam /BCL:(\\d+)/ >= 7",
+    # SpamAssassin
+    "X-Spam-Flag == YES",
+    "X-Spam-Status prefix Yes",
+    "X-Spam-Score >= 5.0",
+    # Rspamd
+    "X-Rspamd-Action in reject|add header|greylist",
+    "X-Rspamd-Score >= 6.0",
+    # Barracuda
+    "X-Barracuda-Spam-Status == Yes",
+    "X-Barracuda-Spam-Score >= 3.5",
+    # SpamExperts / Spampanel
+    "X-SpamExperts-Class == spam",
+    "X-SpamExperts-Outgoing-Class == spam",
+    "X-Spampanel-Outgoing-Class == spam",
+    # Proofpoint
+    "X-Proofpoint-Spam-Details contains rule=spam",
+    # Cisco IronPort
+    "X-IronPort-Anti-Spam-Result contains spam",
+    # Trend Micro
+    "X-TM-AS-Result == spam",
+    "X-TMASE-Result == spam",
+    # Mimecast
+    "X-Mimecast-Spam-Score >= 4",
+    # OVH
+    "X-Ovh-Spam-Reason exists",
+    "X-VR-SpamCause exists",
+    # Generic
+    "X-Spam == Yes",
+    "X-IP-Spam-Verdict == spam",
+]
+
+
+@dataclass
+class SpamConfig:
+    """Spam detection configuration.
+
+    Rules use a DSL format: HEADER [/REGEX/] OPERATOR VALUE
+
+    Examples:
+        X-MS-Exchange-Organization-SCL >= 5
+        X-Spam-Flag == YES
+        X-Microsoft-Antispam /BCL:(\\d+)/ >= 7
+        X-Rspamd-Action in reject|add header|greylist
+        X-Ovh-Spam-Reason exists
+    """
+    enabled: bool = True
+    skip_folders: list[str] = field(default_factory=lambda: [
+        "Junk", "Spam", "Deleted", "Deleted Items", "Trash"
+    ])
+    rules: list[str] = field(default_factory=lambda: DEFAULT_SPAM_RULES.copy())
+
+
 @dataclass
 class Config:
     imap: ImapConfig
@@ -71,6 +129,7 @@ class Config:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     thunderbird: ThunderbirdConfig = field(default_factory=ThunderbirdConfig)
     websocket: WebSocketConfig = field(default_factory=WebSocketConfig)
+    spam: SpamConfig = field(default_factory=SpamConfig)
 
 
 def load_config(path: str | Path) -> Config:
@@ -100,6 +159,7 @@ def load_config(path: str | Path) -> Config:
     db_data = data.get("database", {})
     db_config = DatabaseConfig(
         path=db_data.get("path", "mailmap.db"),
+        categories_file=db_data.get("categories_file", "categories.txt"),
     )
 
     tb_data = data.get("thunderbird", {})
@@ -120,10 +180,20 @@ def load_config(path: str | Path) -> Config:
         port=ws_data.get("port", 9753),
     )
 
+    spam_data = data.get("spam", {})
+    spam_config = SpamConfig(
+        enabled=spam_data.get("enabled", True),
+        skip_folders=spam_data.get("skip_folders", [
+            "Junk", "Spam", "Deleted", "Deleted Items", "Trash"
+        ]),
+        rules=spam_data.get("rules", DEFAULT_SPAM_RULES.copy()),
+    )
+
     return Config(
         imap=imap_config,
         ollama=ollama_config,
         database=db_config,
         thunderbird=tb_config,
         websocket=ws_config,
+        spam=spam_config,
     )

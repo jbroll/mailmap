@@ -10,6 +10,70 @@ from .imap_client import decode_mime_header, extract_body
 
 logger = logging.getLogger("mailmap")
 
+# Headers to extract for spam detection
+SPAM_HEADERS = [
+    # Microsoft/Office 365
+    "X-MS-Exchange-Organization-SCL",
+    "X-Microsoft-Antispam",
+    "X-Forefront-Antispam-Report",
+    # SpamAssassin
+    "X-Spam-Status",
+    "X-Spam-Flag",
+    "X-Spam-Score",
+    "X-Spam-Level",
+    # Rspamd
+    "X-Rspamd-Score",
+    "X-Rspamd-Action",
+    "X-Spamd-Result",
+    # Barracuda
+    "X-Barracuda-Spam-Score",
+    "X-Barracuda-Spam-Status",
+    # SpamExperts / Spampanel
+    "X-SpamExperts-Class",
+    "X-SpamExperts-Outgoing-Class",
+    "X-Spampanel-Outgoing-Class",
+    # Proofpoint
+    "X-Proofpoint-Spam-Details",
+    # Cisco IronPort
+    "X-IronPort-Anti-Spam-Result",
+    # Trend Micro
+    "X-TM-AS-Result",
+    "X-TMASE-Result",
+    # Mimecast
+    "X-Mimecast-Spam-Score",
+    # OVH
+    "X-Ovh-Spam-Reason",
+    "X-VR-SpamCause",
+    # Generic
+    "X-Spam",
+    "X-IP-Spam-Verdict",
+    # Authentication
+    "Authentication-Results",
+]
+
+
+def extract_spam_headers(message) -> dict[str, str]:
+    """Extract spam-related headers from an email message.
+
+    Args:
+        message: A mailbox.Message object
+
+    Returns:
+        Dict of header name -> value for spam-related headers
+    """
+    headers = {}
+    for header_name in SPAM_HEADERS:
+        value = message.get(header_name)
+        if value:
+            # Decode if needed and strip whitespace
+            if isinstance(value, bytes):
+                try:
+                    value = value.decode("utf-8", errors="replace")
+                except Exception:
+                    value = str(value)
+            headers[header_name] = str(value).strip()
+    return headers
+
 
 @dataclass
 class ThunderbirdEmail:
@@ -20,6 +84,7 @@ class ThunderbirdEmail:
     from_addr: str
     body_text: str  # For LLM classification
     mbox_path: str  # For later retrieval of raw email
+    headers: dict[str, str] | None = None  # Spam-related headers for filtering
 
 
 def find_thunderbird_profile(base_path: Path | None = None) -> Path | None:
@@ -138,6 +203,7 @@ def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> It
             subject = decode_mime_header(message.get("Subject"))
             from_addr = decode_mime_header(message.get("From"))
             body = extract_body(message)
+            headers = extract_spam_headers(message)
 
             yield ThunderbirdEmail(
                 message_id=message_id,
@@ -146,6 +212,7 @@ def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> It
                 from_addr=from_addr,
                 body_text=body,
                 mbox_path=mbox_path_str,
+                headers=headers if headers else None,
             )
             count += 1
         except (UnicodeDecodeError, LookupError) as e:
@@ -216,6 +283,7 @@ def read_mbox_random(
                 subject = decode_mime_header(message.get("Subject"))
                 from_addr = decode_mime_header(message.get("From"))
                 body = extract_body(message)
+                headers = extract_spam_headers(message)
 
                 yield ThunderbirdEmail(
                     message_id=message_id,
@@ -224,6 +292,7 @@ def read_mbox_random(
                     from_addr=from_addr,
                     body_text=body,
                     mbox_path=mbox_path_str,
+                    headers=headers if headers else None,
                 )
                 yielded += 1
             except (UnicodeDecodeError, LookupError) as e:
