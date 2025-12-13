@@ -41,3 +41,4 @@ htmlcov/
 config.toml
 *.db
 mailmap.db
+*.xpi
