@@ -1,0 +1,8 @@
+Analyze the following sample emails from the folder "{folder_name}" and generate a brief description of what types of emails this folder contains.
+
+Sample emails:
+{samples_text}
+
+Provide a concise 1-2 sentence description of this folder's purpose and the types of emails it contains. Be specific about the content patterns you observe.
+
+Description:

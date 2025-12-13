@@ -1,0 +1,39 @@
+Review these {category_count} email categories and consolidate duplicates and overlapping categories.
+
+CATEGORIES:
+{categories_list}
+
+RULES:
+1. Merge categories that cover the same semantic area
+2. Merge categories where one is a subset of another
+3. Use PascalCase for final names
+4. Aim for 15-25 final categories
+
+Examples of what TO merge:
+- "PersonalFinance" + "FinanceAndExpenses" + "FinancialStatements" + "Finance" + "FinancialTransactions" → "Finance"
+- "PoliticalNews" + "PoliticalCampaigning" + "PoliticalAlerts" → "Politics"
+- "FamilyUpdates" + "FriendshipAndFamilyUpdates" → "Family"
+- "Personal" + "PersonalCommunication" → "Personal"
+- "TechnicalSupport" + "TechnicalSupportTickets" → "TechnicalSupport"
+- "HealthInsurance" + "HealthcareReminders" + "HealthCareMatters" → "Healthcare"
+- "ProjectManagement" + "ProjectUpdates" + "ProjectUpdatesAndInvitations" → "Projects"
+
+Examples of what NOT to merge:
+- "Finance" and "DonationRequests" - different purposes
+- "Work" and "Personal" - opposite domains
+
+OUTPUT JSON with EVERY original category mapped:
+{{
+  "consolidated_categories": [
+    {{"name": "FinalName", "description": "description", "merged_from": ["Original1", "Original2"]}}
+  ],
+  "rename_map": {{
+    "Original1": "FinalName",
+    "Original2": "FinalName",
+    "Original3": "Original3"
+  }}
+}}
+
+CRITICAL: The rename_map MUST contain ALL {category_count} original category names.
+
+JSON:

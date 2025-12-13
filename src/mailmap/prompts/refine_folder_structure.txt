@@ -1,0 +1,28 @@
+Organize these emails into categories.
+
+EXISTING CATEGORIES (use these first!):
+{existing_categories}
+
+EMAILS (batch {batch_num}):
+{samples_text}
+
+TASK: Assign each email to a category. STRONGLY PREFER existing categories. Only create new ones for genuinely new patterns.
+
+RULES:
+- REUSE existing category names exactly as written (copy-paste the name)
+- Only create a new category if NO existing category fits
+- Every email gets exactly one category
+- Use PascalCase for any new category names (no spaces or underscores)
+
+OUTPUT valid JSON only:
+{{
+  "categories": [
+    {{"name": "CategoryName", "description": "brief description"}}
+  ],
+  "email_assignments": [
+    {{"email_num": 1, "category": "CategoryName"}},
+    {{"email_num": 2, "category": "CategoryName"}}
+  ]
+}}
+
+JSON:

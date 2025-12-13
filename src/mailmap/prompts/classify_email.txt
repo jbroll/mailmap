@@ -1,0 +1,16 @@
+You are an email classification assistant. Classify the following email into the most appropriate folder.
+
+Available folders and their descriptions:
+{folders_text}
+
+Email to classify:
+From: {from_addr}
+Subject: {subject}
+Body: {body}
+
+Respond with a JSON object containing:
+- "predicted_folder": the folder_id that best matches this email
+- "secondary_labels": a list of up to 3 relevant category labels
+- "confidence": a number from 0 to 1 indicating classification confidence
+
+JSON response:

@@ -10,7 +10,7 @@ from pathlib import Path
 from .config import load_config, Config
 from .database import Database, Email, Folder
 from .imap_client import ImapMailbox, ImapListener, EmailMessage
-from .llm import OllamaClient
+from .llm import OllamaClient, SuggestedFolder
 from .mcp_server import run_mcp_server
 from .thunderbird import ThunderbirdReader
 
@@ -384,6 +384,118 @@ def list_folders_cmd(db: Database) -> None:
         db.close()
 
 
+async def init_folders_from_samples(config: Config, db: Database) -> None:
+    """Analyze sample emails iteratively in batches to build folder structure."""
+    tb_config = config.thunderbird
+    profile_path = Path(tb_config.profile_path) if tb_config.profile_path else None
+
+    logger.info("Initializing folder structure from email samples (iterative batching)...")
+
+    try:
+        reader = ThunderbirdReader(profile_path, tb_config.server_filter)
+    except ValueError as e:
+        logger.error(f"Failed to initialize Thunderbird reader: {e}")
+        return
+
+    logger.info(f"Reading emails from Thunderbird profile: {reader.profile_path}")
+
+    # Collect sample emails from all folders
+    sample_limit = tb_config.init_sample_limit
+    folders = reader.list_folders()
+    limit_per_folder = max(50, (sample_limit // max(len(folders), 1)) * 2)
+
+    all_emails = []
+    for email in reader.read_all(limit_per_folder=limit_per_folder):
+        all_emails.append({
+            "subject": email.subject,
+            "from_addr": email.from_addr,
+            "body": email.body_text[:300],
+        })
+        if len(all_emails) >= sample_limit:
+            break
+
+    if not all_emails:
+        logger.error("No emails found to analyze")
+        return
+
+    logger.info(f"Collected {len(all_emails)} emails, processing in batches...")
+
+    # Process in batches, refining categories iteratively
+    batch_size = 100
+    categories = []
+    all_assignments = []
+
+    async with OllamaClient(config.ollama) as llm:
+        for batch_num, start_idx in enumerate(range(0, len(all_emails), batch_size), 1):
+            batch = all_emails[start_idx:start_idx + batch_size]
+
+            categories, assignments = await llm.refine_folder_structure(
+                batch,
+                categories,
+                batch_num,
+                batch_size,
+            )
+
+            all_assignments.extend(assignments)
+            logger.info(f"Batch {batch_num}: {len(categories)} categories after processing {len(batch)} emails")
+
+        # Normalize categories to merge duplicates
+        logger.info("Normalizing categories to merge duplicates...")
+        categories, rename_map = await llm.normalize_categories(categories)
+        logger.info(f"After normalization: {len(categories)} categories")
+
+        # Apply rename map to all assignments
+        for assignment in all_assignments:
+            old_cat = assignment.get("category", "")
+            if old_cat in rename_map:
+                assignment["category"] = rename_map[old_cat]
+
+    # Display final categories
+    print(f"\nProcessed {len(all_emails)} emails in {batch_num} batches.")
+    print(f"Final folder structure ({len(categories)} categories):\n")
+
+    for i, folder in enumerate(categories, 1):
+        print(f"  {i}. {folder.name}")
+        print(f"     {folder.description}")
+
+    print()
+
+    # Count assignments per category
+    category_counts = {}
+    for assignment in all_assignments:
+        cat = assignment.get("category", "Uncategorized")
+        category_counts[cat] = category_counts.get(cat, 0) + 1
+
+    if category_counts:
+        print("Email distribution:")
+        for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+            print(f"  {cat}: {count}")
+        print()
+
+    # Create folders in database
+    db.connect()
+    db.init_schema()
+    try:
+        for folder in categories:
+            db_folder = Folder(
+                folder_id=folder.name,
+                name=folder.name,
+                description=folder.description,
+                last_updated=datetime.now(),
+            )
+            db.upsert_folder(db_folder)
+            logger.info(f"Created folder: {folder.name}")
+
+        print(f"Created {len(categories)} folders in database.")
+    finally:
+        db.close()
+
+
+async def run_init_folders(config: Config, db: Database) -> None:
+    """Run folder initialization mode."""
+    await init_folders_from_samples(config, db)
+
+
 def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
     """Apply command-line overrides to config."""
     if args.db_path:
@@ -400,6 +512,8 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
         config.thunderbird.import_limit = args.import_limit
     if args.samples_per_folder is not None:
         config.thunderbird.samples_per_folder = args.samples_per_folder
+    if args.init_sample_limit is not None:
+        config.thunderbird.init_sample_limit = args.init_sample_limit
     return config
 
 
@@ -448,6 +562,11 @@ def main() -> None:
         action="store_true",
         help="List folders and their descriptions",
     )
+    mode_group.add_argument(
+        "--init-folders",
+        action="store_true",
+        help="Analyze sample emails and suggest folder structure for initialization",
+    )
 
     # Config file
     parser.add_argument(
@@ -494,6 +613,11 @@ def main() -> None:
         type=int,
         help="Number of emails to sample for folder descriptions",
     )
+    override_group.add_argument(
+        "--init-sample-limit",
+        type=int,
+        help="Max emails to sample for --init-folders mode",
+    )
 
     args = parser.parse_args()
 
@@ -515,6 +639,8 @@ def main() -> None:
         list_classifications(db)
     elif args.list_folders:
         list_folders_cmd(db)
+    elif args.init_folders:
+        asyncio.run(run_init_folders(config, db))
     elif args.mcp:
         asyncio.run(run_mcp(config, db))
     elif args.thunderbird:

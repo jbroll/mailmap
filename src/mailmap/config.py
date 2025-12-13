@@ -20,7 +20,7 @@ class ImapConfig:
 class OllamaConfig:
     base_url: str = "http://localhost:11434"
     model: str = "qwen2.5:7b"
-    timeout_seconds: int = 120
+    timeout_seconds: int = 300  # 5 minutes for large batches
 
 
 @dataclass
@@ -34,6 +34,7 @@ class ThunderbirdConfig:
     server_filter: str | None = None  # Filter to specific IMAP server
     samples_per_folder: int = 20  # Number of emails to sample for descriptions
     import_limit: int | None = None  # Max emails to import per folder (None = all)
+    init_sample_limit: int = 100  # Max emails to sample for --init-folders
 
 
 @dataclass
@@ -79,6 +80,7 @@ def load_config(path: str | Path) -> Config:
         server_filter=tb_data.get("server_filter"),
         samples_per_folder=tb_data.get("samples_per_folder", 20),
         import_limit=tb_data.get("import_limit"),
+        init_sample_limit=tb_data.get("init_sample_limit", 100),
     )
 
     return Config(

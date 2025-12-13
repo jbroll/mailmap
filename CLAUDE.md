@@ -46,6 +46,7 @@ Override config file values from command line:
 --thunderbird-server NAME   # Filter to specific IMAP server
 --import-limit N            # Max emails per folder
 --samples-per-folder N      # Emails to sample for descriptions
+--init-sample-limit N       # Max emails for --init-folders mode
 ```
 
 Example iteration workflow:
@@ -74,12 +75,14 @@ pytest -v
 The system consists of these core modules in `src/mailmap/`:
 
 - **config.py**: TOML-based configuration with dataclass models
+- **content.py**: Email content cleaning (removes HTML, signatures, quotes, disclaimers)
 - **database.py**: SQLite schema and operations for folders/emails/classifications
 - **imap_client.py**: IMAP connection, IDLE monitoring, and polling
 - **llm.py**: Ollama REST API client for classification and folder description generation
 - **mcp_server.py**: MCP server exposing `classify_email`, `update_folder_descriptions`, `get_folder_descriptions` tools
 - **thunderbird.py**: Thunderbird profile reader for importing from mbox files in ImapMail cache
 - **main.py**: CLI entry point and orchestration
+- **prompts/**: Editable prompt templates for LLM interactions
 
 ## MCP Tools
 
@@ -92,3 +95,13 @@ The system consists of these core modules in `src/mailmap/`:
 - `folders`: folder_id, name, description, last_updated
 - `emails`: message_id, folder_id, subject, from_addr, body_text, classification, confidence, processed_at
 - `folder_email_map`: Tracks classification status relative to folder descriptions
+
+## Prompt Templates
+
+LLM prompts are stored in `src/mailmap/prompts/` as editable text files:
+
+- **classify_email.txt**: Template for email classification
+- **generate_folder_description.txt**: Template for generating folder descriptions from samples
+- **suggest_folder_structure.txt**: Template for suggesting folder organization from email samples
+
+Templates use Python format strings with placeholders like `{subject}`, `{body}`, `{folders_text}`, etc.

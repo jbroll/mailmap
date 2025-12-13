@@ -29,3 +29,5 @@ path = "mailmap.db"
 samples_per_folder = 20
 # Max emails to import per folder (comment out for unlimited)
 # import_limit = 1000
+# Max emails to sample for --init-folders mode
+init_sample_limit = 100

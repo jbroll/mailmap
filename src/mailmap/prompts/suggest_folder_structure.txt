@@ -1,0 +1,20 @@
+Analyze these {email_count} emails and identify the distinct TOPICS and PURPOSES present. Create a folder for each recurring theme you find.
+
+Emails to analyze:
+{samples_text}
+
+INSTRUCTIONS:
+1. Read through ALL the emails above carefully
+2. Identify recurring topics, projects, services, or purposes
+3. Create a folder for each distinct theme that appears 2+ times
+4. Name folders based on the ACTUAL content you see (not generic labels)
+5. Group by what emails are ABOUT, not just who sent them
+
+Output a JSON array of folders you identified from the emails above. Each folder needs:
+- "name": specific name based on actual topics found
+- "description": what this folder contains, citing specific examples from the emails
+- "example_criteria": actual subject lines or sender patterns from the emails above
+
+Create 15-40 folders based on the patterns in these specific emails.
+
+JSON:

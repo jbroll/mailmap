@@ -1,0 +1,5 @@
+The following JSON is malformed. Fix it and return only valid JSON:
+
+{broken_json}
+
+Return ONLY the repaired JSON, nothing else:
