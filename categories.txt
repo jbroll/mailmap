@@ -10,8 +10,8 @@ about your accounts, investments, loans, or tax documents.
 OnlineServices: Communications from online services and platforms you use about
 billing, account status, policy changes, or feature updates.
 
-Receipts: Confirmations that a payment was made. Includes purchase receipts,
-donation acknowledgments, and payment confirmations.
+Receipts: Invoices and payment confirmations. Includes bills, invoices,
+purchase receipts, donation acknowledgments, and payment confirmations.
 
 AccountSecurity: Security and authentication messages. Password resets,
 verification codes, login alerts, and suspicious activity warnings.
