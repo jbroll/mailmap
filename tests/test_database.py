@@ -83,7 +83,7 @@ class TestEmailOperations:
             folder_id="INBOX",
             subject="Test Subject",
             from_addr="sender@example.com",
-            body_text="This is the email body.",
+            mbox_path="/path/to/mbox",
             processed_at=datetime.now(),
         )
         test_db.insert_email(email)
@@ -93,7 +93,7 @@ class TestEmailOperations:
         assert retrieved.message_id == "<test123@example.com>"
         assert retrieved.subject == "Test Subject"
         assert retrieved.from_addr == "sender@example.com"
-        assert retrieved.body_text == "This is the email body."
+        assert retrieved.mbox_path == "/path/to/mbox"
 
     def test_get_nonexistent_email(self, test_db):
         result = test_db.get_email("<nonexistent@example.com>")
@@ -107,7 +107,7 @@ class TestEmailOperations:
             folder_id="INBOX",
             subject="Test",
             from_addr="test@test.com",
-            body_text="Body",
+            mbox_path="/path/to/mbox",
         )
         test_db.insert_email(email)
 
@@ -118,23 +118,6 @@ class TestEmailOperations:
         assert retrieved.confidence == 0.95
         assert retrieved.processed_at is not None
 
-    def test_get_sample_emails(self, test_db):
-        test_db.upsert_folder(Folder(folder_id="INBOX", name="Inbox"))
-
-        for i in range(15):
-            email = Email(
-                message_id=f"<test{i}@example.com>",
-                folder_id="INBOX",
-                subject=f"Subject {i}",
-                from_addr="sender@example.com",
-                body_text=f"Body {i}",
-                processed_at=datetime.now(),
-            )
-            test_db.insert_email(email)
-
-        samples = test_db.get_sample_emails("INBOX", limit=10)
-        assert len(samples) == 10
-
     def test_get_unclassified_emails(self, test_db):
         test_db.upsert_folder(Folder(folder_id="INBOX", name="Inbox"))
 
@@ -144,7 +127,7 @@ class TestEmailOperations:
             folder_id="INBOX",
             subject="Classified",
             from_addr="test@test.com",
-            body_text="Body",
+            mbox_path="/path/to/mbox",
             classification="Work",
             confidence=0.9,
         )
@@ -156,7 +139,7 @@ class TestEmailOperations:
             folder_id="INBOX",
             subject="Unclassified",
             from_addr="test@test.com",
-            body_text="Body",
+            mbox_path="/path/to/mbox",
         )
         test_db.insert_email(email2)
 

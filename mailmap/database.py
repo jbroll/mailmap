@@ -16,11 +16,16 @@ class Folder:
 
 @dataclass
 class Email:
+    """Email record for classification tracking.
+
+    Note: We store mbox_path instead of body_text to save space.
+    The original email can be retrieved from the mbox file by message_id.
+    """
     message_id: str
     folder_id: str
     subject: str
     from_addr: str
-    body_text: str
+    mbox_path: str  # Path to mbox file for retrieving original email
     classification: str | None = None
     confidence: float | None = None
     processed_at: datetime | None = None
@@ -39,19 +44,10 @@ CREATE TABLE IF NOT EXISTS emails (
     folder_id TEXT NOT NULL,
     subject TEXT,
     from_addr TEXT,
-    body_text TEXT,
+    mbox_path TEXT,
     classification TEXT,
     confidence REAL,
     processed_at TIMESTAMP,
-    FOREIGN KEY (folder_id) REFERENCES folders(folder_id)
-);
-
-CREATE TABLE IF NOT EXISTS folder_email_map (
-    message_id TEXT,
-    folder_id TEXT,
-    classification_version INTEGER DEFAULT 1,
-    PRIMARY KEY (message_id, folder_id),
-    FOREIGN KEY (message_id) REFERENCES emails(message_id),
     FOREIGN KEY (folder_id) REFERENCES folders(folder_id)
 );
 
@@ -66,7 +62,6 @@ class Database:
     Can be used as a context manager for automatic connection handling:
 
         with Database(path) as db:
-            db.init_schema()
             folders = db.get_all_folders()
     """
 
@@ -160,7 +155,7 @@ class Database:
         self.conn.execute(
             """
             INSERT OR REPLACE INTO emails
-            (message_id, folder_id, subject, from_addr, body_text, classification, confidence, processed_at)
+            (message_id, folder_id, subject, from_addr, mbox_path, classification, confidence, processed_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -168,7 +163,7 @@ class Database:
                 email.folder_id,
                 email.subject,
                 email.from_addr,
-                email.body_text,
+                email.mbox_path,
                 email.classification,
                 email.confidence,
                 email.processed_at,
@@ -186,7 +181,7 @@ class Database:
                 folder_id=row["folder_id"],
                 subject=row["subject"],
                 from_addr=row["from_addr"],
-                body_text=row["body_text"],
+                mbox_path=row["mbox_path"],
                 classification=row["classification"],
                 confidence=row["confidence"],
                 processed_at=row["processed_at"],
@@ -206,11 +201,11 @@ class Database:
         )
         self.conn.commit()
 
-    def get_sample_emails(self, folder_id: str, limit: int = 10) -> list[Email]:
-        """Get sample emails from a folder for description generation."""
+    def get_emails_by_classification(self, classification: str) -> list[Email]:
+        """Get all emails with a specific classification (for upload)."""
         rows = self.conn.execute(
-            "SELECT * FROM emails WHERE folder_id = ? ORDER BY processed_at DESC LIMIT ?",
-            (folder_id, limit),
+            "SELECT * FROM emails WHERE classification = ?",
+            (classification,),
         ).fetchall()
         return [
             Email(
@@ -218,13 +213,26 @@ class Database:
                 folder_id=row["folder_id"],
                 subject=row["subject"],
                 from_addr=row["from_addr"],
-                body_text=row["body_text"],
+                mbox_path=row["mbox_path"],
                 classification=row["classification"],
                 confidence=row["confidence"],
                 processed_at=row["processed_at"],
             )
             for row in rows
         ]
+
+    def get_classification_counts(self) -> dict[str, int]:
+        """Get count of emails per classification."""
+        rows = self.conn.execute(
+            """
+            SELECT classification, COUNT(*) as count
+            FROM emails
+            WHERE classification IS NOT NULL
+            GROUP BY classification
+            ORDER BY count DESC
+            """
+        ).fetchall()
+        return {row["classification"]: row["count"] for row in rows}
 
     def get_unclassified_emails(self) -> list[Email]:
         """Get emails that haven't been classified yet."""
@@ -237,7 +245,7 @@ class Database:
                 folder_id=row["folder_id"],
                 subject=row["subject"],
                 from_addr=row["from_addr"],
-                body_text=row["body_text"],
+                mbox_path=row["mbox_path"],
                 classification=row["classification"],
                 confidence=row["confidence"],
                 processed_at=row["processed_at"],

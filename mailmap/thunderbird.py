@@ -13,11 +13,13 @@ logger = logging.getLogger("mailmap")
 
 @dataclass
 class ThunderbirdEmail:
+    """Email read from Thunderbird mbox cache."""
     message_id: str
     folder: str
     subject: str
     from_addr: str
-    body_text: str
+    body_text: str  # For LLM classification
+    mbox_path: str  # For later retrieval of raw email
 
 
 def find_thunderbird_profile(base_path: Path | None = None) -> Path | None:
@@ -125,6 +127,7 @@ def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> It
         logger.error(f"Failed to open mbox {mbox_path}: {e}")
         return
 
+    mbox_path_str = str(mbox_path)
     count = 0
     for message in mbox:
         if limit and count >= limit:
@@ -142,6 +145,7 @@ def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> It
                 subject=subject,
                 from_addr=from_addr,
                 body_text=body,
+                mbox_path=mbox_path_str,
             )
             count += 1
         except (UnicodeDecodeError, LookupError) as e:
@@ -152,6 +156,115 @@ def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> It
             continue
 
     mbox.close()
+
+
+def read_mbox_random(
+    mbox_path: Path,
+    folder_name: str,
+    limit: int | float,
+) -> Iterator[ThunderbirdEmail]:
+    """Read a random sample of emails from an mbox file.
+
+    Args:
+        mbox_path: Path to the mbox file
+        folder_name: Name to assign to the folder
+        limit: Number of emails (int >= 1) or fraction to sample (float 0-1)
+
+    Yields:
+        ThunderbirdEmail objects for each successfully parsed email
+    """
+    import random
+
+    try:
+        mbox = mailbox.mbox(mbox_path)
+    except PermissionError as e:
+        logger.warning(f"Permission denied opening mbox {mbox_path}: {e}")
+        return
+    except FileNotFoundError as e:
+        logger.warning(f"Mbox file not found {mbox_path}: {e}")
+        return
+    except Exception as e:
+        logger.error(f"Failed to open mbox {mbox_path}: {e}")
+        return
+
+    try:
+        # Get all message keys
+        keys = list(mbox.keys())
+        total = len(keys)
+
+        if total == 0:
+            logger.info(f"No emails in {folder_name}")
+            return
+
+        # Calculate sample size: if < 1, treat as percentage; otherwise as count
+        if isinstance(limit, float) and limit < 1:
+            sample_size = max(1, int(total * limit))
+            logger.info(f"Randomly sampling {limit:.0%} ({sample_size} of {total}) emails from {folder_name}")
+        else:
+            sample_size = min(int(limit), total)
+            logger.info(f"Randomly sampling {sample_size} of {total} emails from {folder_name}")
+
+        sampled_keys = random.sample(keys, sample_size)
+
+        mbox_path_str = str(mbox_path)
+        yielded = 0
+
+        for key in sampled_keys:
+            try:
+                message = mbox[key]
+                message_id = message.get("Message-ID", f"<tb-{hash(str(message))}@local>")
+                subject = decode_mime_header(message.get("Subject"))
+                from_addr = decode_mime_header(message.get("From"))
+                body = extract_body(message)
+
+                yield ThunderbirdEmail(
+                    message_id=message_id,
+                    folder=folder_name,
+                    subject=subject,
+                    from_addr=from_addr,
+                    body_text=body,
+                    mbox_path=mbox_path_str,
+                )
+                yielded += 1
+            except (UnicodeDecodeError, LookupError) as e:
+                logger.debug(f"Encoding error parsing email in {folder_name}: {e}")
+                continue
+            except Exception as e:
+                logger.warning(f"Failed to parse email in {folder_name}: {e}")
+                continue
+
+        logger.info(f"Successfully read {yielded} emails from {folder_name}")
+    finally:
+        mbox.close()
+
+
+def get_raw_email(mbox_path: str, message_id: str) -> bytes | None:
+    """Retrieve the raw email content from an mbox file by message_id.
+
+    Args:
+        mbox_path: Path to the mbox file
+        message_id: Message-ID header to search for
+
+    Returns:
+        Raw email bytes if found, None otherwise
+    """
+    try:
+        mbox = mailbox.mbox(mbox_path)
+    except Exception as e:
+        logger.error(f"Failed to open mbox {mbox_path}: {e}")
+        return None
+
+    try:
+        for message in mbox:
+            if message.get("Message-ID") == message_id:
+                # Get the raw bytes of the message
+                return message.as_bytes()
+    except Exception as e:
+        logger.error(f"Error reading mbox {mbox_path}: {e}")
+    finally:
+        mbox.close()
+
+    return None
 
 
 class ThunderbirdReader:
@@ -243,3 +356,29 @@ class ThunderbirdReader:
     ) -> list[ThunderbirdEmail]:
         """Get sample emails from a folder for description generation."""
         return list(self.read_folder(folder_name, server, limit=count))
+
+    def read_folder_random(
+        self,
+        folder_name: str,
+        limit: int | float,
+        server: str | None = None,
+    ) -> Iterator[ThunderbirdEmail]:
+        """Read a random sample of emails from a specific folder.
+
+        Args:
+            folder_name: Name of the folder to read from
+            limit: Number of emails (int >= 1) or fraction to sample (float 0-1)
+            server: Optional server name filter
+        """
+        assert self.profile_path is not None  # Validated in __init__
+        imap_dirs = find_imap_mail_dirs(self.profile_path)
+
+        if server:
+            imap_dirs = [d for d in imap_dirs if d.name == server]
+        elif self.server_filter:
+            imap_dirs = [d for d in imap_dirs if d.name == self.server_filter]
+
+        for imap_dir in imap_dirs:
+            for name, path in list_mbox_files(imap_dir):
+                if name == folder_name:
+                    yield from read_mbox_random(path, folder_name, limit)

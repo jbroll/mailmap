@@ -88,10 +88,12 @@ class TestThunderbirdEmail:
             subject="Test Subject",
             from_addr="sender@example.com",
             body_text="Email body",
+            mbox_path="/path/to/mbox",
         )
         assert email.message_id == "<test@example.com>"
         assert email.folder == "INBOX"
         assert email.subject == "Test Subject"
+        assert email.mbox_path == "/path/to/mbox"
 
 
 class TestFindImapMailDirs:

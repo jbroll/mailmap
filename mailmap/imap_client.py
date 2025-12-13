@@ -151,6 +151,65 @@ class ImapMailbox:
         self.select_folder(from_folder)
         self.client.move([uid], to_folder)
 
+    def append_email(
+        self,
+        folder: str,
+        msg: bytes,
+        flags: tuple[str, ...] = (),
+        msg_time: float | None = None,
+    ) -> int | None:
+        """Append an email message to a folder.
+
+        Args:
+            folder: Target folder name
+            msg: Raw email message as bytes (RFC822 format)
+            flags: Optional tuple of flags (e.g., (r'\\Seen',))
+            msg_time: Optional message timestamp (Unix timestamp)
+
+        Returns:
+            The UID of the appended message if server supports UIDPLUS, else None
+        """
+        from datetime import datetime
+
+        dt = datetime.fromtimestamp(msg_time) if msg_time else None
+        result = self.client.append(folder, msg, flags=flags, msg_time=dt)
+
+        # IMAPClient returns the APPENDUID response if available
+        # Format is typically: b'[APPENDUID <uidvalidity> <uid>] ...'
+        if isinstance(result, bytes):
+            result_str = result.decode("utf-8", errors="replace")
+            if "APPENDUID" in result_str:
+                # Extract UID from response like "[APPENDUID 123456 789]"
+                import re
+                match = re.search(r"APPENDUID\s+\d+\s+(\d+)", result_str)
+                if match:
+                    return int(match.group(1))
+        return None
+
+    def folder_exists(self, folder: str) -> bool:
+        """Check if a folder exists on the server."""
+        folders = self.list_folders()
+        return folder in folders
+
+    def create_folder(self, folder: str) -> bool:
+        """Create a new folder on the server.
+
+        Args:
+            folder: Name of folder to create (can include hierarchy like "Parent/Child")
+
+        Returns:
+            True if folder was created, False if it already exists
+        """
+        if self.folder_exists(folder):
+            return False
+        self.client.create_folder(folder)
+        return True
+
+    def ensure_folder(self, folder: str) -> None:
+        """Ensure a folder exists, creating it if necessary."""
+        if not self.folder_exists(folder):
+            self.client.create_folder(folder)
+
 
 class ImapListener:
     """Async IMAP listener that monitors folders for new emails."""
