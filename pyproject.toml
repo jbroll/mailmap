@@ -25,7 +25,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mailmap"]
+packages = ["mailmap"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
