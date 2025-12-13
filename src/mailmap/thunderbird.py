@@ -1,10 +1,8 @@
 """Thunderbird profile reader for importing existing emails."""
 
-import email
 import logging
 import mailbox
 from dataclasses import dataclass
-from email.header import decode_header
 from pathlib import Path
 from typing import Iterator
 
@@ -178,11 +176,13 @@ class ThunderbirdReader:
 
     def list_servers(self) -> list[str]:
         """List available IMAP servers in the profile."""
+        assert self.profile_path is not None  # Validated in __init__
         imap_dirs = find_imap_mail_dirs(self.profile_path)
         return [d.name for d in imap_dirs]
 
     def list_folders(self, server: str | None = None) -> list[str]:
         """List all folders for a server (or all servers if not specified)."""
+        assert self.profile_path is not None  # Validated in __init__
         imap_dirs = find_imap_mail_dirs(self.profile_path)
 
         if server:
@@ -204,6 +204,7 @@ class ThunderbirdReader:
         limit: int | None = None,
     ) -> Iterator[ThunderbirdEmail]:
         """Read emails from a specific folder."""
+        assert self.profile_path is not None  # Validated in __init__
         imap_dirs = find_imap_mail_dirs(self.profile_path)
 
         if server:
@@ -222,6 +223,7 @@ class ThunderbirdReader:
         limit_per_folder: int | None = None,
     ) -> Iterator[ThunderbirdEmail]:
         """Read all emails from all folders."""
+        assert self.profile_path is not None  # Validated in __init__
         imap_dirs = find_imap_mail_dirs(self.profile_path)
 
         if server:

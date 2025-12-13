@@ -1,6 +1,5 @@
 """MCP server for email classification tools."""
 
-import asyncio
 from datetime import datetime
 
 from mcp.server import Server

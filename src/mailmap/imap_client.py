@@ -5,7 +5,7 @@ import email
 import email.message
 from dataclasses import dataclass
 from email.header import decode_header
-from typing import AsyncIterator, Callable
+from typing import Callable
 
 from imapclient import IMAPClient
 
@@ -43,19 +43,19 @@ def extract_body(msg: email.message.Message) -> str:
             content_type = part.get_content_type()
             if content_type == "text/plain":
                 payload = part.get_payload(decode=True)
-                if payload:
+                if isinstance(payload, bytes):
                     charset = part.get_content_charset() or "utf-8"
                     return payload.decode(charset, errors="replace")
         for part in msg.walk():
             content_type = part.get_content_type()
             if content_type == "text/html":
                 payload = part.get_payload(decode=True)
-                if payload:
+                if isinstance(payload, bytes):
                     charset = part.get_content_charset() or "utf-8"
                     return payload.decode(charset, errors="replace")
     else:
         payload = msg.get_payload(decode=True)
-        if payload:
+        if isinstance(payload, bytes):
             charset = msg.get_content_charset() or "utf-8"
             return payload.decode(charset, errors="replace")
     return ""

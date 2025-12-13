@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -231,14 +230,14 @@ class OllamaClient:
 
         response_text = await self._generate(prompt)
 
-        predicted_folder = fallback_folder
-        secondary_labels = []
+        predicted_folder: str = fallback_folder or "INBOX"
+        secondary_labels: list[str] = []
         confidence = 0.0
 
         data = self._parse_json(response_text)
-        if data:
-            predicted_folder = data.get("predicted_folder", fallback_folder)
-            secondary_labels = data.get("secondary_labels", [])
+        if isinstance(data, dict):
+            predicted_folder = data.get("predicted_folder", fallback_folder) or "INBOX"
+            secondary_labels = data.get("secondary_labels", []) or []
             try:
                 confidence = float(data.get("confidence", 0.0))
             except (TypeError, ValueError):
@@ -249,13 +248,13 @@ class OllamaClient:
         # Validate: folder must exist in our list
         if predicted_folder not in valid_folders:
             logger.warning(f"LLM returned invalid folder '{predicted_folder}', using fallback")
-            predicted_folder = fallback_folder
+            predicted_folder = fallback_folder or "INBOX"
             confidence = 0.0
 
         # Filter: low confidence goes to fallback
         if confidence < confidence_threshold:
             logger.info(f"Low confidence ({confidence:.2f}), routing to {fallback_folder}")
-            predicted_folder = fallback_folder
+            predicted_folder = fallback_folder or "INBOX"
 
         return ClassificationResult(
             predicted_folder=predicted_folder,
@@ -388,7 +387,7 @@ class OllamaClient:
                     except json.JSONDecodeError:
                         pass
 
-        if data:
+        if isinstance(data, dict):
             try:
                 return self._process_refinement_response(data, existing_categories)
             except (KeyError, ValueError) as e:
@@ -501,7 +500,7 @@ class OllamaClient:
         rename_map = {}
 
         data = self._parse_json(response_text)
-        if data:
+        if isinstance(data, dict):
             # Build consolidated categories
             for item in data.get("consolidated_categories", []):
                 consolidated.append(SuggestedFolder(
@@ -614,7 +613,7 @@ JSON:
         response_text = await self._generate(prompt)
 
         data = self._parse_json(response_text)
-        if data:
+        if isinstance(data, dict):
             new_mappings = data.get("mappings", {})
             for old_name, new_name in new_mappings.items():
                 if old_name in missing:

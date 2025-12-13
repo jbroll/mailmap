@@ -64,7 +64,7 @@ class EmailProcessor:
             return
 
         async with OllamaClient(self.config.ollama) as llm:
-            result = await llm.classify_email(
+            classification = await llm.classify_email(
                 message.subject,
                 message.from_addr,
                 message.body_text,
@@ -72,10 +72,10 @@ class EmailProcessor:
             )
 
         self.db.update_classification(
-            message.message_id, result.predicted_folder, result.confidence
+            message.message_id, classification.predicted_folder, classification.confidence
         )
         logger.info(
-            f"Classified as '{result.predicted_folder}' (confidence: {result.confidence:.2f})"
+            f"Classified as '{classification.predicted_folder}' (confidence: {classification.confidence:.2f})"
         )
 
 
@@ -275,8 +275,8 @@ async def import_from_thunderbird(config: Config, db: Database) -> None:
 
         for tb_email in reader.read_folder(folder_name, limit=tb_config.import_limit):
             # Check if already imported
-            existing = db.get_email(tb_email.message_id)
-            if existing:
+            existing_email = db.get_email(tb_email.message_id)
+            if existing_email:
                 continue
 
             # Import email
@@ -295,14 +295,14 @@ async def import_from_thunderbird(config: Config, db: Database) -> None:
             # Classify email
             try:
                 async with OllamaClient(config.ollama) as llm:
-                    result = await llm.classify_email(
+                    classification = await llm.classify_email(
                         tb_email.subject,
                         tb_email.from_addr,
                         tb_email.body_text,
                         folder_descriptions,
                     )
                 db.update_classification(
-                    tb_email.message_id, result.predicted_folder, result.confidence
+                    tb_email.message_id, classification.predicted_folder, classification.confidence
                 )
                 total_classified += 1
             except Exception as e:
@@ -422,8 +422,8 @@ async def init_folders_from_samples(config: Config, db: Database) -> None:
 
     # Process in batches, refining categories iteratively
     batch_size = 100
-    categories = []
-    all_assignments = []
+    categories: list[SuggestedFolder] = []
+    all_assignments: list[dict] = []
 
     async with OllamaClient(config.ollama) as llm:
         for batch_num, start_idx in enumerate(range(0, len(all_emails), batch_size), 1):
@@ -461,7 +461,7 @@ async def init_folders_from_samples(config: Config, db: Database) -> None:
     print()
 
     # Count assignments per category
-    category_counts = {}
+    category_counts: dict[str, int] = {}
     for assignment in all_assignments:
         cat = assignment.get("category", "Uncategorized")
         category_counts[cat] = category_counts.get(cat, 0) + 1
