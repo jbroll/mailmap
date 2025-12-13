@@ -1,5 +1,6 @@
 """Shared test fixtures."""
 
+import mailbox
 import tempfile
 from pathlib import Path
 
@@ -14,6 +15,47 @@ def temp_dir():
     """Create a temporary directory for test files."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
+
+
+@pytest.fixture
+def mock_thunderbird_profile(temp_dir):
+    """Create a mock Thunderbird profile structure."""
+    profile = temp_dir / "mock.default"
+    profile.mkdir()
+
+    # Create ImapMail directory with a mock server
+    imap_mail = profile / "ImapMail" / "imap.example.com"
+    imap_mail.mkdir(parents=True)
+
+    # Create mock mbox files
+    inbox_mbox = imap_mail / "INBOX"
+    sent_mbox = imap_mail / "Sent"
+
+    # Create a simple mbox with test messages
+    mbox = mailbox.mbox(inbox_mbox)
+    msg1 = mailbox.mboxMessage()
+    msg1["Message-ID"] = "<test1@example.com>"
+    msg1["From"] = "sender@example.com"
+    msg1["Subject"] = "Test Subject 1"
+    msg1.set_payload("This is the body of test email 1.")
+    mbox.add(msg1)
+
+    msg2 = mailbox.mboxMessage()
+    msg2["Message-ID"] = "<test2@example.com>"
+    msg2["From"] = "another@example.com"
+    msg2["Subject"] = "Test Subject 2"
+    msg2.set_payload("This is the body of test email 2.")
+    mbox.add(msg2)
+    mbox.close()
+
+    # Create empty Sent mbox
+    sent_mbox.touch()
+
+    # Create .msf files (index files that Thunderbird creates)
+    (imap_mail / "INBOX.msf").touch()
+    (imap_mail / "Sent.msf").touch()
+
+    return profile
 
 
 @pytest.fixture

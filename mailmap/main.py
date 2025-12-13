@@ -458,6 +458,229 @@ async def bulk_classify_from_thunderbird(
     return classifications
 
 
+async def bulk_classify(
+    config: Config,
+    db: Database,
+    ws_server: WebSocketServer | None = None,
+    move: bool = False,
+    target_account: str = "local",
+    min_confidence: float = 0.5,
+) -> list[tuple[str, str]]:
+    """Bulk classify emails using source/target abstractions.
+
+    Automatically selects the best email source based on configuration.
+    If copy/move is requested, uses the appropriate target.
+
+    Args:
+        config: Application configuration
+        db: Database instance
+        ws_server: Optional WebSocket server for copy/move operations
+        move: If True with target, move messages; otherwise copy
+        target_account: Target account for folders: 'local', 'imap', or account ID
+        min_confidence: Minimum confidence to copy/move (below this goes to Unknown)
+
+    Returns:
+        List of (message_id, classification) tuples for successfully classified emails.
+    """
+    from .sources import select_source
+    from .targets import select_target
+
+    classifications: list[tuple[str, str]] = []
+    tb_config = config.thunderbird
+
+    # Load categories
+    categories_path = Path(config.database.categories_file)
+    categories = load_categories(categories_path)
+    folder_descriptions = get_category_descriptions(categories)
+
+    if not folder_descriptions:
+        logger.error(f"No categories found in {categories_path}")
+        logger.error("Run 'mailmap learn' first to generate categories")
+        return classifications
+
+    logger.info(f"Loaded {len(folder_descriptions)} categories from {categories_path}")
+
+    # Select source
+    try:
+        source = select_source(config)
+        logger.info(f"Using {source.source_type} source")
+    except ValueError as e:
+        logger.error(str(e))
+        return classifications
+
+    # Select target if copy/move requested
+    target = None
+    if ws_server:
+        try:
+            target = select_target(config, ws_server, target_account)
+            logger.info(f"Using {target.target_type} target (account: {target_account})")
+        except ValueError as e:
+            logger.error(str(e))
+            return classifications
+
+    # Load spam rules
+    spam_rules = parse_rules(config.spam.rules) if config.spam.enabled else []
+
+    total_imported = 0
+    total_classified = 0
+    total_copied = 0
+    total_failed = 0
+    total_spam = 0
+
+    action_verb = "Moving" if move else "Copying"
+    action_past = "moved" if move else "copied"
+
+    try:
+        async with source:
+            # Connect target if available
+            if target:
+                await target.connect()
+
+            try:
+                # Get folders to process
+                all_folders = await source.list_folders()
+
+                if tb_config.folder_filter:
+                    # Filter to specific folder (handle server:folder syntax)
+                    filter_folder = tb_config.folder_filter
+                    matching = [f for f in all_folders if f == filter_folder or f.endswith(f":{filter_folder}")]
+                    if not matching:
+                        logger.error(f"Folder '{filter_folder}' not found")
+                        return classifications
+                    if len(matching) > 1:
+                        logger.error(
+                            f"Folder '{filter_folder}' found in multiple accounts: {matching}. "
+                            f"Use server:folder syntax."
+                        )
+                        return classifications
+                    folders = matching
+                else:
+                    folders = all_folders
+
+                for folder_spec in folders:
+                    # Extract folder name for display and skip checks
+                    if ":" in folder_spec:
+                        _, folder_name = folder_spec.split(":", 1)
+                    else:
+                        folder_name = folder_spec
+
+                    # Skip spam folders
+                    if config.spam.enabled and folder_name in config.spam.skip_folders:
+                        logger.info(f"Skipping spam folder: {folder_spec}")
+                        continue
+
+                    logger.info(f"Processing folder: {folder_spec}")
+                    folder_count = 0
+
+                    # Read emails from source
+                    limit = int(tb_config.import_limit) if isinstance(tb_config.import_limit, (int, float)) else None
+                    random_sample = tb_config.random_sample
+
+                    async for email in source.read_emails(folder_spec, limit, random_sample):
+                        # Check if already processed
+                        existing = db.get_email(email.message_id)
+                        if existing:
+                            continue
+
+                        # Check for spam (if headers available)
+                        is_spam_result, spam_reason = False, None
+                        if spam_rules and email.headers:
+                            is_spam_result, spam_reason = is_spam(email.headers, spam_rules)
+
+                        if is_spam_result:
+                            email_record = Email(
+                                message_id=email.message_id,
+                                folder_id=folder_name,
+                                subject=email.subject,
+                                from_addr=email.from_addr,
+                                mbox_path=str(email.source_ref) if email.source_ref else "",
+                                is_spam=True,
+                                spam_reason=spam_reason,
+                                processed_at=datetime.now(),
+                            )
+                            db.insert_email(email_record)
+                            total_spam += 1
+                            continue
+
+                        # Import email
+                        email_record = Email(
+                            message_id=email.message_id,
+                            folder_id=folder_name,
+                            subject=email.subject,
+                            from_addr=email.from_addr,
+                            mbox_path=str(email.source_ref) if email.source_ref else "",
+                            processed_at=datetime.now(),
+                        )
+                        db.insert_email(email_record)
+                        total_imported += 1
+                        folder_count += 1
+
+                        # Classify email
+                        try:
+                            async with OllamaClient(config.ollama) as llm:
+                                result = await llm.classify_email(
+                                    email.subject,
+                                    email.from_addr,
+                                    email.body_text,
+                                    folder_descriptions,
+                                )
+                            db.update_classification(
+                                email.message_id,
+                                result.predicted_folder,
+                                result.confidence,
+                            )
+                            classifications.append((email.message_id, result.predicted_folder))
+                            total_classified += 1
+
+                            # Copy/move if target available
+                            if target:
+                                target_folder = (
+                                    result.predicted_folder
+                                    if result.confidence >= min_confidence
+                                    else "Unknown"
+                                )
+
+                                if move:
+                                    success = await target.move_email(email.message_id, target_folder)
+                                else:
+                                    success = await target.copy_email(email.message_id, target_folder)
+
+                                if success:
+                                    total_copied += 1
+                                    conf_str = (
+                                        f" ({result.confidence:.0%})"
+                                        if target_folder != "Unknown"
+                                        else f" (low: {result.confidence:.0%})"
+                                    )
+                                    logger.info(
+                                        f"  {action_past}: {email.subject[:40]}... -> {target_folder}{conf_str}"
+                                    )
+                                else:
+                                    total_failed += 1
+                                    logger.warning(f"  Failed to {action_verb.lower()}: {email.message_id}")
+
+                        except Exception as e:
+                            logger.warning(f"Failed to classify {email.message_id}: {e}")
+
+                    logger.info(f"  Processed {folder_count} emails from {folder_name}")
+
+            finally:
+                if target:
+                    await target.disconnect()
+
+    except Exception as e:
+        logger.error(f"Error during classification: {e}")
+        raise
+
+    logger.info(
+        f"Classification complete: {total_imported} imported, {total_classified} classified, {total_spam} spam"
+    )
+    if target:
+        logger.info(f"Target actions: {total_copied} {action_past}, {total_failed} failed")
+
+    return classifications
+
+
 async def send_to_extension(
     config: Config,
     classifications: list[tuple[str, str]],
@@ -618,8 +841,8 @@ async def run_bulk_classify(
 
             logger.info("Extension connected! Starting classification with immediate copy/move...")
 
-        # Classify emails (with immediate copy/move if ws_server is provided)
-        await bulk_classify_from_thunderbird(
+        # Use the new abstraction-based classify function
+        await bulk_classify(
             config, db, ws_server=ws_server, move=move, target_account=target_account
         )
 
@@ -751,58 +974,70 @@ def summary_cmd(db: Database) -> None:
 
 async def init_folders_from_samples(config: Config) -> None:
     """Analyze sample emails iteratively in batches to build folder structure."""
+    from .sources import select_source
+
     tb_config = config.thunderbird
-    profile_path = Path(tb_config.profile_path) if tb_config.profile_path else None
 
     logger.info("Initializing folder structure from email samples (iterative batching)...")
 
+    # Select source automatically
     try:
-        reader = ThunderbirdReader(profile_path)
+        source = select_source(config)
+        logger.info(f"Using {source.source_type} source")
     except ValueError as e:
-        logger.error(f"Failed to initialize Thunderbird reader: {e}")
+        logger.error(str(e))
         return
-
-    logger.info(f"Reading emails from Thunderbird profile: {reader.profile_path}")
-
-    # Determine which folders to read from
-    if tb_config.folder_filter:
-        # Validate folder upfront (will error if ambiguous)
-        try:
-            server, folder_name = reader.resolve_folder(tb_config.folder_filter)
-            folders = [f"{server}:{folder_name}"]
-            logger.info(f"Reading from folder: {folder_name} (from {server})")
-        except ValueError as e:
-            logger.error(str(e))
-            return
-    else:
-        # Get all folders with server prefix
-        folders = reader.list_folders_qualified()
 
     # Collect sample emails
     sample_limit = tb_config.init_sample_limit
     all_emails = []
 
-    for folder_spec in folders:
-        # Use percentage or count based on sample_limit type
-        if isinstance(sample_limit, float) and sample_limit < 1:
-            # Percentage-based: use random sampling
-            emails = list(reader.read_folder_random(folder_spec, sample_limit))
-            logger.info(f"Sampled {len(emails)} emails ({sample_limit:.0%}) from {folder_spec}")
-        elif tb_config.random_sample:
-            # Random sampling with count limit
-            limit = int(sample_limit) if len(folders) == 1 else max(50, int(sample_limit) // len(folders))
-            emails = list(reader.read_folder_random(folder_spec, limit))
-        else:
-            # Sequential sampling
-            limit = int(sample_limit) if len(folders) == 1 else max(50, int(sample_limit) // len(folders))
-            emails = list(reader.read_folder(folder_spec, limit=limit))
+    async with source:
+        # Get folders to process
+        all_folders = await source.list_folders()
 
-        for email in emails:
-            all_emails.append({
-                "subject": email.subject,
-                "from_addr": email.from_addr,
-                "body": email.body_text[:300],
-            })
+        if tb_config.folder_filter:
+            # Filter to specific folder (handle server:folder syntax)
+            filter_folder = tb_config.folder_filter
+            matching = [f for f in all_folders if f == filter_folder or f.endswith(f":{filter_folder}")]
+            if not matching:
+                logger.error(f"Folder '{filter_folder}' not found")
+                return
+            if len(matching) > 1:
+                logger.error(
+                    f"Folder '{filter_folder}' found in multiple accounts: {matching}. "
+                    f"Use server:folder syntax."
+                )
+                return
+            folders = matching
+            logger.info(f"Reading from folder: {filter_folder}")
+        else:
+            folders = all_folders
+
+        for folder_spec in folders:
+            # Calculate limit for this folder
+            if isinstance(sample_limit, float) and sample_limit < 1:
+                # Percentage-based (handled by source)
+                limit = int(sample_limit * 1000)  # Estimate
+                random_sample = True
+            elif tb_config.random_sample:
+                limit = int(sample_limit) if len(folders) == 1 else max(50, int(sample_limit) // len(folders))
+                random_sample = True
+            else:
+                limit = int(sample_limit) if len(folders) == 1 else max(50, int(sample_limit) // len(folders))
+                random_sample = False
+
+            count = 0
+            async for email in source.read_emails(folder_spec, limit, random_sample):
+                all_emails.append({
+                    "subject": email.subject,
+                    "from_addr": email.from_addr,
+                    "body": email.body_text[:300],
+                })
+                count += 1
+
+            if random_sample:
+                logger.info(f"Sampled {count} emails from {folder_spec}")
 
     if not all_emails:
         logger.error("No emails found to analyze")
