@@ -248,18 +248,16 @@ mailmap.executeAction = async (action, params) => {
 
 // Handle server events
 mailmap.on("connected", (data) => {
-  console.log("[mailmap] Server assigned client ID:", data.clientId);
+  console.log("[mailmap] Client ID:", data.clientId);
 });
 
 mailmap.on("emailClassified", (data) => {
-  console.log("[mailmap] Email classified:", data.messageId, "->", data.folder);
-  // Could show notification or update UI here
+  console.log("[mailmap] Classified:", data.messageId, "->", data.folder);
 });
 
 mailmap.on("batchComplete", (data) => {
-  console.log("[mailmap] Batch complete:", data);
+  console.log("[mailmap] Batch complete:", data.count, "emails");
 });
 
 // Start connection
-console.log("[mailmap] Extension starting...");
 mailmap.connect();

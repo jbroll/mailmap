@@ -2,7 +2,7 @@
  * WebSocket connection management for mailmap.
  */
 
-const MAILMAP_WS_URL = "ws://127.0.0.1:8765";
+const MAILMAP_WS_URL = "ws://127.0.0.1:9753";
 const RECONNECT_DELAYS = [2000, 4000, 8000, 16000, 30000]; // Exponential backoff
 
 class MailmapConnection {
@@ -12,6 +12,7 @@ class MailmapConnection {
     this.pendingRequests = new Map(); // id -> {resolve, reject, timeout}
     this.eventHandlers = new Map(); // event -> [handlers]
     this.connected = false;
+    this.loggedDisconnect = false; // Track if we've logged disconnect
   }
 
   connect() {
@@ -19,23 +20,29 @@ class MailmapConnection {
       return;
     }
 
-    console.log("[mailmap] Connecting to", MAILMAP_WS_URL);
     this.ws = new WebSocket(MAILMAP_WS_URL);
 
     this.ws.onopen = () => {
-      console.log("[mailmap] Connected");
+      console.log("[mailmap] Connected to", MAILMAP_WS_URL);
       this.connected = true;
       this.reconnectAttempt = 0;
+      this.loggedDisconnect = false;
     };
 
     this.ws.onclose = () => {
-      console.log("[mailmap] Disconnected");
+      const wasConnected = this.connected;
       this.connected = false;
+
+      // Only log disconnect once per disconnect cycle
+      if (wasConnected || !this.loggedDisconnect) {
+        console.log("[mailmap] Disconnected, will retry...");
+        this.loggedDisconnect = true;
+      }
       this.scheduleReconnect();
     };
 
-    this.ws.onerror = (error) => {
-      console.error("[mailmap] WebSocket error:", error);
+    this.ws.onerror = () => {
+      // Suppress error logging - onclose will handle it
     };
 
     this.ws.onmessage = (event) => {
@@ -45,7 +52,6 @@ class MailmapConnection {
 
   scheduleReconnect() {
     const delay = RECONNECT_DELAYS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS.length - 1)];
-    console.log(`[mailmap] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt + 1})`);
     this.reconnectAttempt++;
     setTimeout(() => this.connect(), delay);
   }
@@ -94,11 +100,14 @@ class MailmapConnection {
     let result;
     let error = null;
 
+    console.log(`[mailmap] <- ${action}`, params);
+
     try {
       result = await this.executeAction(action, params || {});
+      console.log(`[mailmap] -> ${action} OK`);
     } catch (e) {
       error = e.message || String(e);
-      console.error(`[mailmap] Action ${action} failed:`, e);
+      console.error(`[mailmap] -> ${action} FAILED:`, error);
     }
 
     // Send response
@@ -116,7 +125,6 @@ class MailmapConnection {
 
   send(data) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn("[mailmap] Cannot send: not connected");
       return false;
     }
     this.ws.send(JSON.stringify(data));

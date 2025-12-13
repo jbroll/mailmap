@@ -61,7 +61,7 @@ class WebSocketConfig:
     """WebSocket server configuration for Thunderbird MailExtension communication."""
     enabled: bool = False
     host: str = "127.0.0.1"  # Localhost only for security
-    port: int = 8765
+    port: int = 9753
 
 
 @dataclass
@@ -117,7 +117,7 @@ def load_config(path: str | Path) -> Config:
     ws_config = WebSocketConfig(
         enabled=ws_data.get("enabled", False),
         host=ws_data.get("host", "127.0.0.1"),
-        port=ws_data.get("port", 8765),
+        port=ws_data.get("port", 9753),
     )
 
     return Config(

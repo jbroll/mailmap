@@ -38,4 +38,4 @@ enabled = false
 # Host to bind to (127.0.0.1 for localhost only)
 host = "127.0.0.1"
 # Port for WebSocket server
-port = 8765
+port = 9753
