@@ -3,16 +3,15 @@
  */
 
 const MAILMAP_WS_URL = "ws://127.0.0.1:9753";
-const RECONNECT_DELAYS = [2000, 4000, 8000, 16000, 30000]; // Exponential backoff
+const RECONNECT_DELAY = 5000; // Retry every 5 seconds
 
 class MailmapConnection {
   constructor() {
     this.ws = null;
-    this.reconnectAttempt = 0;
     this.pendingRequests = new Map(); // id -> {resolve, reject, timeout}
     this.eventHandlers = new Map(); // event -> [handlers]
     this.connected = false;
-    this.loggedDisconnect = false; // Track if we've logged disconnect
+    this.reconnectScheduled = false; // Prevent double scheduling
   }
 
   connect() {
@@ -20,29 +19,25 @@ class MailmapConnection {
       return;
     }
 
+    this.reconnectScheduled = false; // Clear flag when actually connecting
     this.ws = new WebSocket(MAILMAP_WS_URL);
 
     this.ws.onopen = () => {
       console.log("[mailmap] Connected to", MAILMAP_WS_URL);
       this.connected = true;
-      this.reconnectAttempt = 0;
-      this.loggedDisconnect = false;
     };
 
     this.ws.onclose = () => {
-      const wasConnected = this.connected;
       this.connected = false;
-
-      // Only log disconnect once per disconnect cycle
-      if (wasConnected || !this.loggedDisconnect) {
-        console.log("[mailmap] Disconnected, will retry...");
-        this.loggedDisconnect = true;
-      }
       this.scheduleReconnect();
     };
 
-    this.ws.onerror = () => {
-      // Suppress error logging - onclose will handle it
+    this.ws.onerror = (event) => {
+      // Connection errors before open won't trigger onclose
+      // Schedule reconnect if we're not connected yet
+      if (!this.connected) {
+        this.scheduleReconnect();
+      }
     };
 
     this.ws.onmessage = (event) => {
@@ -51,9 +46,12 @@ class MailmapConnection {
   }
 
   scheduleReconnect() {
-    const delay = RECONNECT_DELAYS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS.length - 1)];
-    this.reconnectAttempt++;
-    setTimeout(() => this.connect(), delay);
+    // Prevent double scheduling from onerror + onclose both firing
+    if (this.reconnectScheduled) {
+      return;
+    }
+    this.reconnectScheduled = true;
+    setTimeout(() => this.connect(), RECONNECT_DELAY);
   }
 
   handleMessage(raw) {

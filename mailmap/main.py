@@ -257,6 +257,7 @@ async def bulk_classify_from_thunderbird(
     ws_server: WebSocketServer | None = None,
     move: bool = False,
     target_account: str = "local",
+    min_confidence: float = 0.5,
 ) -> list[tuple[str, str]]:
     """Bulk classify emails from Thunderbird using existing categories.
 
@@ -267,6 +268,7 @@ async def bulk_classify_from_thunderbird(
         config: Application configuration
         db: Database instance
         ws_server: Optional WebSocket server for immediate copy/move after classification
+        min_confidence: Minimum confidence to copy/move (below this goes to Unknown)
         move: If True with ws_server, move messages; otherwise copy
         target_account: Target account for folders when using ws_server
 
@@ -396,7 +398,9 @@ async def bulk_classify_from_thunderbird(
 
                 # Immediately copy/move if WebSocket server is connected
                 if ws_server and ws_server.is_connected:
-                    target_folder_spec = {"path": result.predicted_folder, "accountId": target_account}
+                    # Use predicted folder if confidence is high enough, otherwise Unknown
+                    target_folder = result.predicted_folder if result.confidence >= min_confidence else "Unknown"
+                    target_folder_spec = {"path": target_folder, "accountId": target_account}
                     response = await ws_server.send_request(
                         action,
                         {
@@ -410,7 +414,8 @@ async def bulk_classify_from_thunderbird(
                         success_count = result_data.get("moved" if move else "copied", 0)
                         total_copied += success_count
                         if success_count:
-                            logger.info(f"  {action_past}: {tb_email.subject[:40]}... -> {result.predicted_folder}")
+                            conf_str = f" ({result.confidence:.0%})" if target_folder != "Unknown" else f" (low: {result.confidence:.0%})"
+                            logger.info(f"  {action_past}: {tb_email.subject[:40]}... -> {target_folder}{conf_str}")
                         else:
                             not_found = result_data.get("notFound", [])
                             if not_found:

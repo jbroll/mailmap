@@ -69,6 +69,36 @@ class SuggestedFolder:
     example_criteria: list[str]
 
 
+def _normalize_folder_name(predicted: str, valid_folders: set[str]) -> str | None:
+    """Try to match predicted folder to valid folders.
+
+    Handles case-insensitive matching and singular/plural variations.
+
+    Returns:
+        Matched folder name or None if no match found
+    """
+    # Build lookup: lowercase -> original name
+    lower_map = {f.lower(): f for f in valid_folders}
+
+    predicted_lower = predicted.lower()
+
+    # Exact case-insensitive match
+    if predicted_lower in lower_map:
+        return lower_map[predicted_lower]
+
+    # Try adding/removing 's' for plural/singular
+    if predicted_lower.endswith('s'):
+        singular = predicted_lower[:-1]
+        if singular in lower_map:
+            return lower_map[singular]
+    else:
+        plural = predicted_lower + 's'
+        if plural in lower_map:
+            return lower_map[plural]
+
+    return None
+
+
 def _format_email_samples(emails: list[dict[str, str]], max_emails: int, max_body_length: int = 150) -> str:
     """Format email samples for prompt inclusion.
 
@@ -207,15 +237,9 @@ class OllamaClient:
         )
         valid_folders = set(folder_descriptions.keys())
 
-        # Find fallback folder - look for miscellaneous/uncategorized, or use first folder
+        # Default fallback only used for completely invalid responses
         if fallback_folder is None:
-            fallback_candidates = ["MiscellaneousAndUncategorized", "Miscellaneous", "Uncategorized", "INBOX"]
-            for candidate in fallback_candidates:
-                if candidate in valid_folders:
-                    fallback_folder = candidate
-                    break
-            if fallback_folder is None and valid_folders:
-                fallback_folder = next(iter(valid_folders))
+            fallback_folder = "Unknown"
 
         # Clean email content before sending to LLM
         cleaned = extract_email_summary(subject, from_addr, body, max_body_length=500)
@@ -247,14 +271,19 @@ class OllamaClient:
 
         # Validate: folder must exist in our list
         if predicted_folder not in valid_folders:
-            logger.warning(f"LLM returned invalid folder '{predicted_folder}', using fallback")
-            predicted_folder = fallback_folder or "INBOX"
-            confidence = 0.0
+            # Try case-insensitive match and common variations
+            normalized = _normalize_folder_name(predicted_folder, valid_folders)
+            if normalized:
+                logger.debug(f"Normalized folder '{predicted_folder}' to '{normalized}'")
+                predicted_folder = normalized
+            else:
+                logger.warning(f"LLM returned invalid folder '{predicted_folder}', using fallback")
+                predicted_folder = fallback_folder
+                confidence = 0.0
 
-        # Filter: low confidence goes to fallback
+        # Log low confidence but don't change prediction - caller decides what to do
         if confidence < confidence_threshold:
-            logger.info(f"Low confidence ({confidence:.2f}), routing to {fallback_folder}")
-            predicted_folder = fallback_folder or "INBOX"
+            logger.info(f"Low confidence ({confidence:.2f}) for '{predicted_folder}'")
 
         return ClassificationResult(
             predicted_folder=predicted_folder,

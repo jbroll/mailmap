@@ -12,6 +12,7 @@ from mailmap.llm import (
     OllamaClient,
     SuggestedFolder,
     _format_email_samples,
+    _normalize_folder_name,
     load_prompt,
 )
 
@@ -99,6 +100,41 @@ class TestFormatEmailSamples:
         result = _format_email_samples(emails, max_emails=1)
         assert "no subject" in result
         assert "unknown" in result
+
+
+class TestNormalizeFolderName:
+    """Tests for folder name normalization."""
+
+    def test_exact_match(self):
+        valid = {"Newsletters", "Shopping", "Personal"}
+        assert _normalize_folder_name("Newsletters", valid) == "Newsletters"
+
+    def test_case_insensitive(self):
+        valid = {"Newsletters", "Shopping", "Personal"}
+        assert _normalize_folder_name("newsletters", valid) == "Newsletters"
+        assert _normalize_folder_name("NEWSLETTERS", valid) == "Newsletters"
+        assert _normalize_folder_name("NewsLetters", valid) == "Newsletters"
+
+    def test_singular_to_plural(self):
+        valid = {"Newsletters", "Orders", "Receipts"}
+        assert _normalize_folder_name("Newsletter", valid) == "Newsletters"
+        assert _normalize_folder_name("Order", valid) == "Orders"
+        assert _normalize_folder_name("Receipt", valid) == "Receipts"
+
+    def test_plural_to_singular(self):
+        valid = {"Personal", "Financial", "Travel"}
+        assert _normalize_folder_name("Personals", valid) == "Personal"
+        assert _normalize_folder_name("Financials", valid) == "Financial"
+
+    def test_case_and_plural_combined(self):
+        valid = {"Newsletters", "Orders"}
+        assert _normalize_folder_name("newsletter", valid) == "Newsletters"
+        assert _normalize_folder_name("ORDER", valid) == "Orders"
+
+    def test_no_match_returns_none(self):
+        valid = {"Newsletters", "Shopping"}
+        assert _normalize_folder_name("Unknown", valid) is None
+        assert _normalize_folder_name("Completely Different", valid) is None
 
 
 class TestClassificationResult:
@@ -228,7 +264,7 @@ class TestClassifyEmail:
 
     @pytest.mark.asyncio
     async def test_classify_email_malformed_json(self, ollama_config):
-        """Should return fallback on malformed JSON."""
+        """Should return Unknown on malformed JSON."""
         mock_response = {"response": "This is not valid JSON at all"}
 
         async with OllamaClient(ollama_config) as client:
@@ -245,7 +281,8 @@ class TestClassifyEmail:
                     folder_descriptions={"INBOX": "Inbox"},
                 )
 
-                assert result.predicted_folder == "INBOX"
+                # Invalid responses fall back to Unknown
+                assert result.predicted_folder == "Unknown"
                 assert result.secondary_labels == []
                 assert result.confidence == 0.0
 
@@ -301,13 +338,13 @@ class TestClassifyEmail:
                     },
                 )
 
-                # Should fall back to INBOX (first fallback candidate)
-                assert result.predicted_folder == "INBOX"
+                # Should fall back to Unknown for invalid folder
+                assert result.predicted_folder == "Unknown"
                 assert result.confidence == 0.0
 
     @pytest.mark.asyncio
-    async def test_classify_email_low_confidence_uses_fallback(self, ollama_config):
-        """Should use fallback when confidence is below threshold."""
+    async def test_classify_email_low_confidence_keeps_prediction(self, ollama_config):
+        """Low confidence keeps prediction - caller decides routing."""
         mock_response = {
             "response": json.dumps({
                 "predicted_folder": "Work",
@@ -333,13 +370,13 @@ class TestClassifyEmail:
                     },
                 )
 
-                # Should use Miscellaneous as fallback
-                assert result.predicted_folder == "Miscellaneous"
-                assert result.confidence == 0.3  # Original confidence preserved
+                # LLM prediction is preserved - caller uses confidence to decide routing
+                assert result.predicted_folder == "Work"
+                assert result.confidence == 0.3
 
     @pytest.mark.asyncio
-    async def test_classify_email_custom_threshold(self, ollama_config):
-        """Should respect custom confidence threshold."""
+    async def test_classify_email_custom_threshold_logs_low_confidence(self, ollama_config):
+        """Custom threshold is used for logging, prediction preserved."""
         mock_response = {
             "response": json.dumps({
                 "predicted_folder": "Work",
@@ -355,7 +392,8 @@ class TestClassifyEmail:
                 mock_resp.raise_for_status = MagicMock()
                 mock_post.return_value = mock_resp
 
-                # With threshold 0.8, confidence 0.7 should use fallback
+                # With threshold 0.8, confidence 0.7 is below threshold
+                # but prediction is still preserved - caller decides routing
                 result = await client.classify_email(
                     subject="Test",
                     from_addr="test@test.com",
@@ -367,11 +405,13 @@ class TestClassifyEmail:
                     confidence_threshold=0.8,
                 )
 
-                assert result.predicted_folder == "INBOX"
+                # Prediction preserved, confidence available for caller
+                assert result.predicted_folder == "Work"
+                assert result.confidence == 0.7
 
     @pytest.mark.asyncio
-    async def test_classify_email_finds_miscellaneous_fallback(self, ollama_config):
-        """Should find MiscellaneousAndUncategorized as fallback."""
+    async def test_classify_email_invalid_response_returns_unknown(self, ollama_config):
+        """Invalid LLM response returns Unknown, not a folder from the list."""
         mock_response = {"response": "invalid"}
 
         async with OllamaClient(ollama_config) as client:
@@ -391,7 +431,9 @@ class TestClassifyEmail:
                     },
                 )
 
-                assert result.predicted_folder == "MiscellaneousAndUncategorized"
+                # Invalid responses return Unknown - no special Miscellaneous handling
+                assert result.predicted_folder == "Unknown"
+                assert result.confidence == 0.0
 
     @pytest.mark.asyncio
     async def test_classify_email_invalid_confidence_type(self, ollama_config):
