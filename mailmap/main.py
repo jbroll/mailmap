@@ -897,42 +897,39 @@ async def cleanup_thunderbird_folders(
 ) -> None:
     """Delete classification folders from Thunderbird via extension.
 
+    Queries Thunderbird for folders matching category names and deletes them.
+
     Args:
         config: Application configuration
-        db: Database instance (to get list of classification folders)
+        db: Database instance (unused but kept for API consistency)
         target_account: Target account: 'local', 'imap', or account ID
     """
     from .protocol import Action
     from .websocket_server import WebSocketServer
 
-    db.connect()
-    db.init_schema()
+    # Load category names from categories.txt
+    categories = load_categories(config.database.categories_file)
+    category_names = {cat.name for cat in categories}
+
+    if not category_names:
+        logger.info("No categories defined")
+        return
+
+    logger.info(f"Will check for {len(category_names)} category folders in {target_account}")
+
+    # Start WebSocket server
+    ws_config = config.websocket
+    if not ws_config.enabled:
+        logger.error("WebSocket is not enabled in config")
+        return
+
+    server = WebSocketServer(ws_config, db, config.database.categories_file)
+    server_task = asyncio.create_task(server.start())
+
+    logger.info(f"WebSocket server started on ws://{ws_config.host}:{ws_config.port}")
+    logger.info("Waiting for Thunderbird extension to connect...")
 
     try:
-        # Get distinct classifications from database
-        rows = db.conn.execute(
-            "SELECT DISTINCT classification FROM emails WHERE classification IS NOT NULL"
-        ).fetchall()
-        folders = [row["classification"] for row in rows]
-
-        if not folders:
-            logger.info("No classification folders to delete")
-            return
-
-        logger.info(f"Will delete {len(folders)} folders from {target_account}")
-
-        # Start WebSocket server
-        ws_config = config.websocket
-        if not ws_config.enabled:
-            logger.error("WebSocket is not enabled in config")
-            return
-
-        server = WebSocketServer(ws_config, db, config.database.categories_file)
-        server_task = asyncio.create_task(server.start())
-
-        logger.info(f"WebSocket server started on ws://{ws_config.host}:{ws_config.port}")
-        logger.info("Waiting for Thunderbird extension to connect...")
-
         # Wait for extension to connect
         for _ in range(30):
             if server.is_connected:
@@ -940,17 +937,38 @@ async def cleanup_thunderbird_folders(
             await asyncio.sleep(1)
         else:
             logger.error("Timeout waiting for extension to connect")
-            await server.stop()
-            server_task.cancel()
             return
 
         logger.info("Extension connected!")
+
+        # Query Thunderbird for existing folders
+        response = await server.send_request(
+            Action.LIST_FOLDERS,
+            {"accountId": target_account},
+            timeout=10,
+        )
+
+        if not response or not response.ok:
+            error = response.error if response else "No response"
+            logger.error(f"Failed to list folders: {error}")
+            return
+
+        # Find folders that match category names
+        # Each folder is {accountId, path, name, type}
+        existing_folders = (response.result or {}).get("folders", [])
+        folders_to_delete = [f["name"] for f in existing_folders if f.get("name") in category_names]
+
+        if not folders_to_delete:
+            logger.info("No classification folders found to delete")
+            return
+
+        logger.info(f"Found {len(folders_to_delete)} classification folders to delete")
 
         # Delete each folder
         deleted = 0
         failed = 0
 
-        for folder_name in sorted(folders):
+        for folder_name in sorted(folders_to_delete):
             response = await server.send_request(
                 Action.DELETE_FOLDER,
                 {"accountId": target_account, "path": folder_name},
@@ -967,11 +985,9 @@ async def cleanup_thunderbird_folders(
 
         logger.info(f"Cleanup complete: {deleted} deleted, {failed} failed")
 
+    finally:
         await server.stop()
         server_task.cancel()
-
-    finally:
-        db.close()
 
 
 def upload_to_imap(
