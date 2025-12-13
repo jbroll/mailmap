@@ -1,9 +1,9 @@
 """WebSocket protocol definitions for mailmap <-> Thunderbird MailExtension communication."""
 
-from dataclasses import dataclass, asdict
+import json
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any
-import json
 
 
 class Action(str, Enum):

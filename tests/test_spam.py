@@ -5,7 +5,6 @@ import pytest
 from mailmap.spam import (
     Operator,
     RuleParseError,
-    SpamRule,
     check_rule,
     is_spam,
     parse_rule,

@@ -1,15 +1,17 @@
 """Tests for WebSocket server."""
 
 import asyncio
+import contextlib
 import json
+
 import pytest
 import websockets
 
 from mailmap.categories import Category, save_categories
 from mailmap.config import WebSocketConfig
 from mailmap.database import Database
-from mailmap.websocket_server import WebSocketServer
 from mailmap.protocol import Action, Event, Request, Response, ServerEvent, parse_message
+from mailmap.websocket_server import WebSocketServer
 
 
 class TestProtocol:
@@ -121,10 +123,8 @@ class TestWebSocketServer:
         yield server
         await server.stop()
         server_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await server_task
-        except asyncio.CancelledError:
-            pass
 
     @pytest.mark.asyncio
     async def test_server_starts(self, config, db, categories_file):

@@ -44,9 +44,9 @@ def load_categories(path: str | Path) -> list[Category]:
     if not path.exists():
         return []
 
-    categories = []
-    current_name = None
-    current_desc_lines = []
+    categories: list[Category] = []
+    current_name: str | None = None
+    current_desc_lines: list[str] = []
 
     def save_current():
         nonlocal current_name, current_desc_lines

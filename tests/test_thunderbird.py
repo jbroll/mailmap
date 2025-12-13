@@ -1,7 +1,6 @@
 """Tests for Thunderbird module."""
 
 import mailbox
-from pathlib import Path
 
 import pytest
 

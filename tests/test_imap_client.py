@@ -1,18 +1,18 @@
 """Tests for IMAP client module."""
 
-from unittest.mock import MagicMock, patch
 import email
 from email.mime.text import MIMEText
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mailmap.config import ImapConfig
 from mailmap.imap_client import (
-    ImapMailbox,
     EmailMessage,
+    ImapMailbox,
     decode_mime_header,
     extract_body,
 )
-from mailmap.config import ImapConfig
 
 
 @pytest.fixture

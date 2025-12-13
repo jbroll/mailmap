@@ -13,6 +13,7 @@ Examples:
     X-Ovh-Spam-Reason exists
 """
 
+import contextlib
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -94,7 +95,7 @@ def parse_rule(rule: str) -> SpamRule:
         try:
             pattern = re.compile(pattern_str)
         except re.error as e:
-            raise RuleParseError(f"Invalid regex pattern: {e}")
+            raise RuleParseError(f"Invalid regex pattern: {e}") from e
         tokens = tokens[1:]
 
     # Next token is the operator
@@ -106,11 +107,11 @@ def parse_rule(rule: str) -> SpamRule:
 
     try:
         operator = _parse_operator(op_str)
-    except ValueError:
-        raise RuleParseError(f"Unknown operator '{op_str}' in rule: {rule}")
+    except ValueError as e:
+        raise RuleParseError(f"Unknown operator '{op_str}' in rule: {rule}") from e
 
     # Parse value based on operator
-    value = None
+    value: list[str] | float | int | str | None = None
     if operator == Operator.EXISTS:
         # No value needed
         pass
@@ -127,8 +128,8 @@ def parse_rule(rule: str) -> SpamRule:
         try:
             value_str = tokens[0]
             value = float(value_str) if "." in value_str else int(value_str)
-        except ValueError:
-            raise RuleParseError(f"Invalid numeric value '{tokens[0]}': {rule}")
+        except ValueError as e:
+            raise RuleParseError(f"Invalid numeric value '{tokens[0]}': {rule}") from e
     else:
         # String value (rest of tokens)
         if not tokens:
@@ -287,9 +288,6 @@ def parse_rules(rule_strings: list[str]) -> list[SpamRule]:
         rule_str = rule_str.strip()
         if not rule_str or rule_str.startswith("#"):
             continue
-        try:
+        with contextlib.suppress(RuleParseError):
             rules.append(parse_rule(rule_str))
-        except RuleParseError:
-            # Log warning but continue
-            pass
     return rules

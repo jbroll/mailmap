@@ -1,16 +1,15 @@
 """WebSocket server for Thunderbird MailExtension communication."""
 
 import asyncio
-import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 import websockets
-from websockets.server import WebSocketServerProtocol
+from websockets.asyncio.server import Server, ServerConnection
 
-from .categories import load_categories, get_category_descriptions
+from .categories import get_category_descriptions, load_categories
 from .config import WebSocketConfig
 from .database import Database
 from .protocol import Action, Event, Request, Response, ServerEvent, parse_message
@@ -25,9 +24,9 @@ class WebSocketServer:
         self.config = config
         self.db = db
         self.categories_file = Path(categories_file)
-        self._clients: dict[str, WebSocketServerProtocol] = {}
-        self._pending_requests: dict[str, asyncio.Future] = {}
-        self._server = None
+        self._clients: dict[str, ServerConnection] = {}
+        self._pending_requests: dict[str, asyncio.Future[Response]] = {}
+        self._server: Server | None = None
         self._running = False
 
     async def start(self) -> None:
@@ -53,7 +52,7 @@ class WebSocketServer:
             await self._server.wait_closed()
             logger.info("WebSocket server stopped")
 
-    async def _handle_client(self, websocket: WebSocketServerProtocol) -> None:
+    async def _handle_client(self, websocket: ServerConnection) -> None:
         """Handle a client connection."""
         client_id = str(uuid.uuid4())[:8]
         self._clients[client_id] = websocket
@@ -64,14 +63,16 @@ class WebSocketServer:
 
         try:
             async for message in websocket:
-                await self._handle_message(client_id, websocket, message)
+                # Convert bytes to str if needed (JSON messages are text)
+                text = message if isinstance(message, str) else message.decode("utf-8")
+                await self._handle_message(client_id, websocket, text)
         except websockets.ConnectionClosed:
             logger.info(f"Client {client_id} disconnected")
         finally:
             del self._clients[client_id]
 
     async def _handle_message(
-        self, client_id: str, websocket: WebSocketServerProtocol, raw: str
+        self, client_id: str, websocket: ServerConnection, raw: str
     ) -> None:
         """Handle an incoming message from a client."""
         parsed = parse_message(raw)
@@ -167,7 +168,7 @@ class WebSocketServer:
             logger.debug(f"Sent {action.value} request to {client_id}")
 
             return await asyncio.wait_for(future, timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"Request {request_id} timed out")
             self._pending_requests.pop(request_id, None)
             return None
@@ -191,7 +192,7 @@ class WebSocketServer:
                 logger.warning(f"Failed to send event to {client_id}: {e}")
 
     async def _send_event(
-        self, websocket: WebSocketServerProtocol, event: Event, data: dict[str, Any]
+        self, websocket: ServerConnection, event: Event, data: dict[str, Any]
     ) -> None:
         """Send an event to a specific client."""
         server_event = ServerEvent(event=event.value, data=data)

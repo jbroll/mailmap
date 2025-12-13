@@ -1,14 +1,12 @@
 """Tests for categories module."""
 
-import pytest
-from pathlib import Path
 
 from mailmap.categories import (
     Category,
+    format_categories_for_prompt,
+    get_category_descriptions,
     load_categories,
     save_categories,
-    get_category_descriptions,
-    format_categories_for_prompt,
 )
 
 
@@ -120,7 +118,7 @@ class TestSaveCategories:
         loaded = load_categories(cat_file)
 
         assert len(loaded) == len(original)
-        for orig, load in zip(original, loaded):
+        for orig, load in zip(original, loaded, strict=True):
             assert orig.name == load.name
             assert orig.description == load.description
 

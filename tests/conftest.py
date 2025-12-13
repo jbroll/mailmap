@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from mailmap.config import Config, ImapConfig, OllamaConfig, DatabaseConfig, ThunderbirdConfig
+from mailmap.config import Config, DatabaseConfig, ImapConfig, OllamaConfig, ThunderbirdConfig
 from mailmap.database import Database
 
 

@@ -1,19 +1,18 @@
 """Tests for LLM module."""
 
 import json
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import httpx
 
 from mailmap.config import OllamaConfig
 from mailmap.llm import (
-    OllamaClient,
     ClassificationResult,
     FolderDescription,
+    OllamaClient,
     SuggestedFolder,
-    load_prompt,
     _format_email_samples,
+    load_prompt,
 )
 
 

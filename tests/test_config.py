@@ -3,12 +3,11 @@
 import pytest
 
 from mailmap.config import (
-    load_config,
-    Config,
+    DatabaseConfig,
     ImapConfig,
     OllamaConfig,
-    DatabaseConfig,
     ThunderbirdConfig,
+    load_config,
 )
 
 

@@ -1,6 +1,5 @@
 """Tests for email content cleaning module."""
 
-import pytest
 
 from mailmap.content import clean_email_content, extract_email_summary
 

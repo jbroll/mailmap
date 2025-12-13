@@ -7,12 +7,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from .categories import Category, load_categories, save_categories, get_category_descriptions
+from .categories import Category, get_category_descriptions, load_categories, save_categories
 from .config import Config, load_config
 from .database import Database, Email
 from .imap_client import EmailMessage, ImapListener, ImapMailbox
 from .llm import OllamaClient, SuggestedFolder
-from .spam import parse_rules, is_spam
+from .spam import is_spam, parse_rules
 from .thunderbird import ThunderbirdReader
 
 logging.basicConfig(
@@ -133,9 +133,6 @@ async def run_daemon(config: Config, db: Database) -> None:
     db.init_schema()
 
     try:
-        await sync_folders(config, db)
-        await generate_folder_descriptions(config, db)
-
         # Build list of services to run
         tasks = []
 
@@ -306,10 +303,11 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
         folder_count = 0
 
         # Choose between random sampling and sequential reading
-        if tb_config.random_sample and tb_config.import_limit:
-            email_iterator = reader.read_folder_random(folder_name, tb_config.import_limit)
+        limit = int(tb_config.import_limit) if isinstance(tb_config.import_limit, (int, float)) else None
+        if tb_config.random_sample and limit:
+            email_iterator = reader.read_folder_random(folder_name, limit)
         else:
-            email_iterator = reader.read_folder(folder_name, limit=tb_config.import_limit)
+            email_iterator = reader.read_folder(folder_name, limit=limit)
 
         for tb_email in email_iterator:
             # Check if already processed
@@ -318,7 +316,8 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
                 continue
 
             # Check for spam
-            is_spam_result, spam_reason = is_spam(tb_email.headers, spam_rules) if spam_rules else (False, None)
+            headers = tb_email.headers or {}
+            is_spam_result, spam_reason = is_spam(headers, spam_rules) if spam_rules else (False, None)
             if is_spam_result:
                 email_record = Email(
                     message_id=tb_email.message_id,
@@ -678,7 +677,6 @@ def upload_to_imap(
         dry_run: If True, show what would be uploaded without uploading
         folder_filter: If provided, only upload emails classified to this folder
     """
-    from .imap_client import ImapMailbox
     from .thunderbird import get_raw_email
 
     db.connect()
