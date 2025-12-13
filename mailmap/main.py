@@ -688,34 +688,34 @@ async def run_init_folders(config: Config, db: Database) -> None:
 
 def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
     """Apply command-line overrides to config."""
-    if args.db_path:
+    if getattr(args, "db_path", None):
         config.database.path = args.db_path
-    if args.ollama_url:
+    if getattr(args, "ollama_url", None):
         config.ollama.base_url = args.ollama_url
-    if args.ollama_model:
+    if getattr(args, "ollama_model", None):
         config.ollama.model = args.ollama_model
-    if args.thunderbird_profile:
+    if getattr(args, "thunderbird_profile", None):
         config.thunderbird.profile_path = args.thunderbird_profile
-    if args.thunderbird_server:
+    if getattr(args, "thunderbird_server", None):
         config.thunderbird.server_filter = args.thunderbird_server
-    if args.import_limit is not None:
-        # If >= 1, treat as integer count; if < 1, treat as percentage
-        if args.import_limit >= 1:
-            config.thunderbird.import_limit = int(args.import_limit)
-        else:
-            config.thunderbird.import_limit = args.import_limit
-    if args.samples_per_folder is not None:
-        config.thunderbird.samples_per_folder = args.samples_per_folder
-    if args.init_sample_limit is not None:
-        # If >= 1, treat as integer count; if < 1, treat as percentage
-        if args.init_sample_limit >= 1:
-            config.thunderbird.init_sample_limit = int(args.init_sample_limit)
-        else:
-            config.thunderbird.init_sample_limit = args.init_sample_limit
-    if args.thunderbird_folder:
+    if getattr(args, "thunderbird_folder", None):
         config.thunderbird.folder_filter = args.thunderbird_folder
-    if args.random:
+    if getattr(args, "samples_per_folder", None) is not None:
+        config.thunderbird.samples_per_folder = args.samples_per_folder
+    if getattr(args, "random", False):
         config.thunderbird.random_sample = True
+
+    # Handle --limit (used for import_limit and init_sample_limit)
+    import_limit = getattr(args, "import_limit", None)
+    if import_limit is not None:
+        # If >= 1, treat as integer count; if < 1, treat as percentage
+        if import_limit >= 1:
+            config.thunderbird.import_limit = int(import_limit)
+            config.thunderbird.init_sample_limit = int(import_limit)
+        else:
+            config.thunderbird.import_limit = import_limit
+            config.thunderbird.init_sample_limit = import_limit
+
     return config
 
 
@@ -823,126 +823,146 @@ def upload_to_imap(
         db.close()
 
 
-def main() -> None:
-    """Main entry point."""
-    parser = argparse.ArgumentParser(description="Mailmap email classification system")
-
-    # Mode selection
-    mode_group = parser.add_argument_group("modes")
-    mode_group.add_argument(
-        "--sync-folders",
-        action="store_true",
-        help="Sync folders and generate descriptions, then exit",
-    )
-    mode_group.add_argument(
-        "--thunderbird",
-        action="store_true",
-        help="Import emails from Thunderbird profile, generate descriptions, and classify",
-    )
-    mode_group.add_argument(
-        "--reset-db",
-        action="store_true",
-        help="Delete the database file and exit (for clean slate iteration)",
-    )
-    mode_group.add_argument(
-        "--list",
-        action="store_true",
-        help="List classification results from the database",
-    )
-    mode_group.add_argument(
-        "--list-folders",
-        action="store_true",
-        help="List folders and their descriptions",
-    )
-    mode_group.add_argument(
-        "--init-folders",
-        action="store_true",
-        help="Analyze sample emails and suggest folder structure for initialization",
-    )
-    mode_group.add_argument(
-        "--learn-folders",
-        action="store_true",
-        help="Learn categories from user's existing folders (excludes system folders)",
-    )
-    mode_group.add_argument(
-        "--upload",
-        action="store_true",
-        help="Upload classified emails to IMAP server folders",
-    )
-    mode_group.add_argument(
-        "--upload-dry-run",
-        action="store_true",
-        help="Show what would be uploaded without actually uploading",
-    )
-    mode_group.add_argument(
-        "--upload-folder",
-        type=str,
-        metavar="FOLDER",
-        help="Only upload emails classified to this folder (use with --upload or --upload-dry-run)",
-    )
-
-    # Config file
+def add_common_args(parser: argparse.ArgumentParser) -> None:
+    """Add common arguments to a parser."""
     parser.add_argument(
         "-c", "--config",
         type=Path,
         default=Path("config.toml"),
         help="Path to configuration file",
     )
-
-    # Config overrides
-    override_group = parser.add_argument_group("config overrides")
-    override_group.add_argument(
+    parser.add_argument(
         "--db-path",
         type=str,
         help="Override database path",
     )
-    override_group.add_argument(
+    parser.add_argument(
         "--ollama-url",
         type=str,
         help="Override Ollama base URL",
     )
-    override_group.add_argument(
+    parser.add_argument(
         "--ollama-model",
         type=str,
         help="Override Ollama model name",
     )
-    override_group.add_argument(
-        "--thunderbird-profile",
+
+
+def add_thunderbird_args(parser: argparse.ArgumentParser) -> None:
+    """Add Thunderbird-related arguments to a parser."""
+    parser.add_argument(
+        "--profile",
         type=str,
-        help="Override Thunderbird profile path",
+        dest="thunderbird_profile",
+        help="Thunderbird profile path",
     )
-    override_group.add_argument(
-        "--thunderbird-server",
+    parser.add_argument(
+        "--server",
         type=str,
-        help="Filter to specific IMAP server in Thunderbird",
+        dest="thunderbird_server",
+        help="Filter to specific IMAP server",
     )
-    override_group.add_argument(
-        "--import-limit",
-        type=float,
-        help="Max emails: integer for count (2500), fraction for percentage (0.1 = 10%%)",
-    )
-    override_group.add_argument(
-        "--samples-per-folder",
-        type=int,
-        help="Number of emails to sample for folder descriptions",
-    )
-    override_group.add_argument(
-        "--init-sample-limit",
-        type=float,
-        help="Max emails for --init-folders: integer for count, fraction for percentage (0.2 = 20%%)",
-    )
-    override_group.add_argument(
-        "--thunderbird-folder",
+    parser.add_argument(
+        "--folder",
         type=str,
-        help="Import only from this folder (e.g., INBOX)",
-    )
-    override_group.add_argument(
-        "--random",
-        action="store_true",
-        help="Randomly sample emails instead of sequential (use with --import-limit)",
+        dest="thunderbird_folder",
+        help="Process only this folder (e.g., INBOX)",
     )
 
+
+def add_limit_args(parser: argparse.ArgumentParser) -> None:
+    """Add limit-related arguments to a parser."""
+    parser.add_argument(
+        "--limit",
+        type=float,
+        dest="import_limit",
+        help="Max emails: integer for count, fraction for percentage (0.1 = 10%%)",
+    )
+    parser.add_argument(
+        "--random",
+        action="store_true",
+        help="Randomly sample emails instead of sequential",
+    )
+
+
+def main() -> None:
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Mailmap email classification system",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # daemon - Run IMAP daemon (default)
+    daemon_parser = subparsers.add_parser("daemon", help="Run IMAP listener daemon")
+    add_common_args(daemon_parser)
+
+    # import - Import from Thunderbird
+    import_parser = subparsers.add_parser("import", help="Import emails from Thunderbird and classify")
+    add_common_args(import_parser)
+    add_thunderbird_args(import_parser)
+    add_limit_args(import_parser)
+    import_parser.add_argument(
+        "--samples",
+        type=int,
+        dest="samples_per_folder",
+        help="Number of emails to sample for folder descriptions",
+    )
+
+    # sync - Sync folders from IMAP
+    sync_parser = subparsers.add_parser("sync", help="Sync folders from IMAP and generate descriptions")
+    add_common_args(sync_parser)
+
+    # init - Initialize folder structure
+    init_parser = subparsers.add_parser("init", help="Analyze emails and suggest folder structure")
+    add_common_args(init_parser)
+    add_thunderbird_args(init_parser)
+    add_limit_args(init_parser)
+
+    # learn - Learn from existing folders
+    learn_parser = subparsers.add_parser("learn", help="Learn categories from existing folder structure")
+    add_common_args(learn_parser)
+    add_thunderbird_args(learn_parser)
+    add_limit_args(learn_parser)
+
+    # upload - Upload to IMAP
+    upload_parser = subparsers.add_parser("upload", help="Upload classified emails to IMAP folders")
+    add_common_args(upload_parser)
+    upload_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be uploaded without uploading",
+    )
+    upload_parser.add_argument(
+        "--folder",
+        type=str,
+        dest="upload_folder",
+        help="Only upload emails classified to this folder",
+    )
+
+    # list - List classifications
+    list_parser = subparsers.add_parser("list", help="List classification results")
+    add_common_args(list_parser)
+    list_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum results to show (default: 50)",
+    )
+
+    # folders - List folders
+    folders_parser = subparsers.add_parser("folders", help="List folders and descriptions")
+    add_common_args(folders_parser)
+
+    # reset - Reset database
+    reset_parser = subparsers.add_parser("reset", help="Delete database and start fresh")
+    add_common_args(reset_parser)
+
     args = parser.parse_args()
+
+    # Default to daemon if no command specified
+    if not args.command:
+        args.command = "daemon"
 
     if not args.config.exists():
         logger.error(f"Configuration file not found: {args.config}")
@@ -951,24 +971,25 @@ def main() -> None:
     config = load_config(args.config)
     config = apply_cli_overrides(config, args)
 
-    # Handle reset-db before creating Database object
-    if args.reset_db:
+    # Handle reset before creating Database object
+    if args.command == "reset":
         reset_database(Path(config.database.path))
         sys.exit(0)
 
     db = Database(config.database.path)
 
-    if args.list:
-        list_classifications(db)
-    elif args.list_folders:
+    if args.command == "list":
+        limit = getattr(args, "limit", 50)
+        list_classifications(db, limit=limit)
+    elif args.command == "folders":
         list_folders_cmd(db)
-    elif args.init_folders:
+    elif args.command == "init":
         asyncio.run(run_init_folders(config, db))
-    elif args.learn_folders:
+    elif args.command == "learn":
         asyncio.run(run_learn_folders(config, db))
-    elif args.thunderbird:
+    elif args.command == "import":
         asyncio.run(run_thunderbird_import(config, db))
-    elif args.sync_folders:
+    elif args.command == "sync":
         async def sync_only():
             db.connect()
             db.init_schema()
@@ -978,9 +999,11 @@ def main() -> None:
             finally:
                 db.close()
         asyncio.run(sync_only())
-    elif args.upload or args.upload_dry_run:
-        upload_to_imap(config, db, dry_run=args.upload_dry_run, folder_filter=args.upload_folder)
-    else:
+    elif args.command == "upload":
+        dry_run = getattr(args, "dry_run", False)
+        folder_filter = getattr(args, "upload_folder", None)
+        upload_to_imap(config, db, dry_run=dry_run, folder_filter=folder_filter)
+    elif args.command == "daemon":
         asyncio.run(run_daemon(config, db))
 
 

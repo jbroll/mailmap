@@ -19,53 +19,66 @@ pip install -e ".[dev]"
 # Copy and configure
 cp config.example.toml config.toml
 # Edit config.toml with your IMAP credentials and Ollama settings
-
-# Run the daemon (monitors IMAP and classifies emails)
-mailmap -c config.toml
-
-# Sync folders and generate descriptions only
-mailmap -c config.toml --sync-folders
-
-# Run as MCP server only (for external MCP clients)
-mailmap -c config.toml --mcp
-
-# Import from Thunderbird profile (generates descriptions + classifies)
-mailmap -c config.toml --thunderbird
-
-# Upload classified emails to IMAP folders
-mailmap -c config.toml --upload
-
-# Upload only emails classified to a specific folder (for incremental testing)
-mailmap -c config.toml --upload --upload-folder "Receipts"
-
-# Preview what would be uploaded (dry run)
-mailmap -c config.toml --upload-dry-run
-mailmap -c config.toml --upload-dry-run --upload-folder "Receipts"
-
-# Reset database (delete and start fresh)
-mailmap -c config.toml --reset-db
 ```
 
 Requires Ollama running locally with a model (default: `qwen2.5:7b`).
 
-## CLI Config Overrides
-
-Override config file values from command line:
+## CLI Commands
 
 ```bash
---db-path PATH              # Database file path
---ollama-url URL            # Ollama base URL
---ollama-model MODEL        # Ollama model name
---thunderbird-profile PATH  # Thunderbird profile path
---thunderbird-server NAME   # Filter to specific IMAP server
---import-limit N            # Max emails per folder
---samples-per-folder N      # Emails to sample for descriptions
---init-sample-limit N       # Max emails for --init-folders mode
+# Run the daemon (monitors IMAP and classifies emails)
+mailmap daemon
+
+# Import from Thunderbird profile (generates descriptions + classifies)
+mailmap import --server outlook.office365.com --folder INBOX --limit 1000
+
+# Sync folders from IMAP and generate descriptions
+mailmap sync
+
+# Analyze emails and suggest folder structure
+mailmap init --server outlook.office365.com --limit 500
+
+# Learn categories from existing folder structure
+mailmap learn --server outlook.office365.com
+
+# Upload classified emails to IMAP folders
+mailmap upload
+mailmap upload --folder "Receipts"    # Only specific folder
+mailmap upload --dry-run              # Preview without uploading
+
+# List classification results
+mailmap list
+mailmap list --limit 100
+
+# List folders and descriptions
+mailmap folders
+
+# Reset database (delete and start fresh)
+mailmap reset
+```
+
+## Common Options
+
+All subcommands support:
+```bash
+-c, --config PATH      # Config file (default: config.toml)
+--db-path PATH         # Override database path
+--ollama-url URL       # Override Ollama base URL
+--ollama-model MODEL   # Override Ollama model name
+```
+
+Import/init/learn subcommands also support:
+```bash
+--profile PATH         # Thunderbird profile path
+--server NAME          # Filter to specific IMAP server
+--folder NAME          # Process only this folder (e.g., INBOX)
+--limit N              # Max emails (integer) or percentage (0.1 = 10%)
+--random               # Randomly sample instead of sequential
 ```
 
 Example iteration workflow:
 ```bash
-mailmap --reset-db && mailmap --thunderbird --import-limit 50 --ollama-model qwen2.5:3b
+mailmap reset && mailmap import --limit 50 --ollama-model qwen2.5:3b
 ```
 
 ## Testing
