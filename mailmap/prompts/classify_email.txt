@@ -29,6 +29,9 @@ First, identify the PRIMARY SIGNAL (what makes this email fundamentally differen
    - Product availability notification → Shopping (NOT Promotions)
    - Order confirmation with payment → Orders (NOT Receipts)
    - Receipt after order fulfilled → Receipts (NOT Orders)
+   - Career KEY TEST: Would this email make sense if you were NOT job searching?
+     If YES → NOT Career (political campaigns, developer newsletters, general professional content)
+     If NO → Career (recruiter outreach, job alerts, interview requests)
 
 Available folders:
 {folders_text}
@@ -106,6 +109,15 @@ Reasoning:
 2. Intent: Inviting to a scheduled event
 3. Decision: Event invitation, even though it's platform-generated
 Classification: {{"predicted_folder": "Events", "secondary_labels": [], "confidence": 0.90}}
+
+Email: From: contact@campaign.org | Subject: We need you in this fight - join our team!
+Body: The stakes have never been higher. Join our campaign and help us win this election.
+
+Reasoning:
+1. Sender: Political campaign organization
+2. Intent: Soliciting volunteers/donations for political campaign
+3. Decision: Career KEY TEST - Would I receive this if not job searching? YES, political campaigns email everyone. "Join our team" means volunteer, not employment.
+Classification: {{"predicted_folder": "Promotions", "secondary_labels": [], "confidence": 0.90}}
 
 Now classify this email following the same reasoning process:
 
