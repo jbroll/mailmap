@@ -1,5 +1,6 @@
 """Configuration management for mailmap."""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 import tomllib
@@ -7,6 +8,12 @@ import tomllib
 
 @dataclass
 class ImapConfig:
+    """IMAP server configuration.
+
+    Credentials can be provided via environment variables:
+    - MAILMAP_IMAP_USERNAME: IMAP username (overrides config file)
+    - MAILMAP_IMAP_PASSWORD: IMAP password (overrides config file)
+    """
     host: str
     port: int = 993
     username: str = ""
@@ -14,6 +21,16 @@ class ImapConfig:
     use_ssl: bool = True
     idle_folders: list[str] = field(default_factory=lambda: ["INBOX"])
     poll_interval_seconds: int = 300
+
+    def __post_init__(self):
+        """Apply environment variable overrides for credentials."""
+        env_username = os.environ.get("MAILMAP_IMAP_USERNAME")
+        env_password = os.environ.get("MAILMAP_IMAP_PASSWORD")
+
+        if env_username:
+            self.username = env_username
+        if env_password:
+            self.password = env_password
 
 
 @dataclass

@@ -40,7 +40,7 @@ class TestOllamaConfig:
         config = OllamaConfig()
         assert config.base_url == "http://localhost:11434"
         assert config.model == "qwen2.5:7b"
-        assert config.timeout_seconds == 120
+        assert config.timeout_seconds == 300  # Increased for large batch processing
 
 
 class TestDatabaseConfig:

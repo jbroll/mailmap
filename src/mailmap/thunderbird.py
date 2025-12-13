@@ -1,6 +1,7 @@
 """Thunderbird profile reader for importing existing emails."""
 
 import email
+import logging
 import mailbox
 from dataclasses import dataclass
 from email.header import decode_header
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Iterator
 
 from .imap_client import decode_mime_header, extract_body
+
+logger = logging.getLogger("mailmap")
 
 
 @dataclass
@@ -102,10 +105,26 @@ def list_mbox_files(mail_dir: Path) -> list[tuple[str, Path]]:
 
 
 def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> Iterator[ThunderbirdEmail]:
-    """Read emails from an mbox file."""
+    """Read emails from an mbox file.
+
+    Args:
+        mbox_path: Path to the mbox file
+        folder_name: Name to assign to the folder
+        limit: Maximum number of emails to read (None for all)
+
+    Yields:
+        ThunderbirdEmail objects for each successfully parsed email
+    """
     try:
         mbox = mailbox.mbox(mbox_path)
-    except Exception:
+    except PermissionError as e:
+        logger.warning(f"Permission denied opening mbox {mbox_path}: {e}")
+        return
+    except FileNotFoundError as e:
+        logger.warning(f"Mbox file not found {mbox_path}: {e}")
+        return
+    except Exception as e:
+        logger.error(f"Failed to open mbox {mbox_path}: {e}")
         return
 
     count = 0
@@ -127,7 +146,11 @@ def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> It
                 body_text=body,
             )
             count += 1
-        except Exception:
+        except (UnicodeDecodeError, LookupError) as e:
+            logger.debug(f"Encoding error parsing email in {folder_name}: {e}")
+            continue
+        except Exception as e:
+            logger.warning(f"Failed to parse email in {folder_name}: {e}")
             continue
 
     mbox.close()

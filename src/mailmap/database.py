@@ -61,21 +61,47 @@ CREATE INDEX IF NOT EXISTS idx_emails_classification ON emails(classification);
 
 
 class Database:
+    """SQLite database wrapper with connection management.
+
+    Can be used as a context manager for automatic connection handling:
+
+        with Database(path) as db:
+            db.init_schema()
+            folders = db.get_all_folders()
+    """
+
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self._conn: sqlite3.Connection | None = None
 
+    def __enter__(self) -> "Database":
+        """Connect to database and initialize schema."""
+        self.connect()
+        self.init_schema()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Close database connection."""
+        self.close()
+
     def connect(self) -> None:
+        """Open database connection."""
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
 
     def close(self) -> None:
+        """Close database connection."""
         if self._conn:
             self._conn.close()
             self._conn = None
 
     @property
     def conn(self) -> sqlite3.Connection:
+        """Get the active database connection.
+
+        Raises:
+            RuntimeError: If database is not connected
+        """
         if self._conn is None:
             raise RuntimeError("Database not connected")
         return self._conn
