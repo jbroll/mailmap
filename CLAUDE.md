@@ -29,17 +29,15 @@ Requires Ollama running locally with a model (default: `qwen2.5:7b`).
 # Run the daemon (monitors IMAP and classifies emails)
 mailmap daemon
 
-# Import from Thunderbird profile (generates descriptions + classifies)
-mailmap import --server outlook.office365.com --folder INBOX --limit 1000
-
-# Sync folders from IMAP and generate descriptions
-mailmap sync
-
-# Analyze emails and suggest folder structure
-mailmap init --server outlook.office365.com --limit 500
-
-# Learn categories from existing folder structure
+# Learn categories from existing Thunderbird folder structure
+# Generates descriptions and saves to categories.txt
 mailmap learn --server outlook.office365.com
+
+# Bulk classify emails from Thunderbird using categories.txt
+mailmap classify --server outlook.office365.com --limit 1000
+
+# Analyze emails and suggest new folder structure (saves to categories.txt)
+mailmap init --server outlook.office365.com --limit 500
 
 # Upload classified emails to IMAP folders
 mailmap upload
@@ -50,14 +48,38 @@ mailmap upload --dry-run              # Preview without uploading
 mailmap list
 mailmap list --limit 100
 
-# List folders and descriptions
-mailmap folders
+# List categories from categories.txt
+mailmap categories
 
 # Show classification summary with counts per category
 mailmap summary
 
+# Clear classifications (keeps emails, removes classifications)
+mailmap clear
+mailmap clear --folder INBOX          # Only specific source folder
+
 # Reset database (delete and start fresh)
 mailmap reset
+```
+
+## Typical Workflow
+
+```bash
+# 1. Learn categories from your existing Thunderbird folders
+mailmap learn --server outlook.office365.com
+
+# 2. Edit categories.txt as needed (human/LLM-friendly format)
+
+# 3. Classify emails using those categories
+mailmap classify --server outlook.office365.com --limit 500
+
+# 4. Review results
+mailmap summary
+mailmap list --limit 20
+
+# 5. Upload to IMAP folders
+mailmap upload --dry-run
+mailmap upload
 ```
 
 ## Common Options
@@ -70,18 +92,13 @@ All subcommands support:
 --ollama-model MODEL   # Override Ollama model name
 ```
 
-Import/init/learn subcommands also support:
+Thunderbird subcommands (learn/classify/init) also support:
 ```bash
 --profile PATH         # Thunderbird profile path
 --server NAME          # Filter to specific IMAP server
 --folder NAME          # Process only this folder (e.g., INBOX)
 --limit N              # Max emails (integer) or percentage (0.1 = 10%)
 --random               # Randomly sample instead of sequential
-```
-
-Example iteration workflow:
-```bash
-mailmap reset && mailmap import --limit 50 --ollama-model qwen2.5:3b
 ```
 
 ## Testing
@@ -93,9 +110,6 @@ pytest
 # Run specific test file
 pytest tests/test_database.py
 
-# Run specific test
-pytest tests/test_database.py::TestFolderOperations::test_upsert_and_get_folder
-
 # Run with verbose output
 pytest -v
 ```
@@ -105,18 +119,34 @@ pytest -v
 The system consists of these core modules in `mailmap/`:
 
 - **config.py**: TOML-based configuration with dataclass models
+- **categories.py**: Load/save categories from editable text file (categories.txt)
 - **content.py**: Email content cleaning (removes HTML, signatures, quotes, disclaimers)
-- **database.py**: SQLite schema and operations for folders/emails/classifications
+- **database.py**: SQLite schema and operations for emails/classifications
 - **imap_client.py**: IMAP connection, IDLE monitoring, and polling
 - **llm.py**: Ollama REST API client for classification and folder description generation
-- **thunderbird.py**: Thunderbird profile reader for importing from mbox files in ImapMail cache
+- **spam.py**: Spam detection from email headers using configurable rules
+- **thunderbird.py**: Thunderbird profile reader for importing from mbox files
+- **websocket_server.py**: WebSocket server for Thunderbird extension communication
+- **protocol.py**: WebSocket message schemas (Request, Response, Event)
 - **main.py**: CLI entry point and orchestration
 - **prompts/**: Editable prompt templates for LLM interactions
 
+## Categories File
+
+Categories are stored in `categories.txt` (human/LLM-editable format):
+
+```
+Financial: Banking, investments, and brokerage communications. Includes
+account statements, trade confirmations, and tax documents.
+
+Receipts: Purchase receipts, invoices, and payment confirmations.
+
+Orders: Order confirmations and shipping notifications.
+```
+
 ## Database Schema
 
-- `folders`: folder_id, name, description, last_updated
-- `emails`: message_id, folder_id, subject, from_addr, mbox_path, classification, confidence, processed_at
+- `emails`: message_id, folder_id, subject, from_addr, mbox_path, classification, confidence, is_spam, spam_reason, processed_at
 
 ## Prompt Templates
 
