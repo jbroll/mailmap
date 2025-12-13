@@ -318,7 +318,8 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
                 continue
 
             # Check for spam
-            if spam_rules and is_spam(tb_email.headers, spam_rules):
+            is_spam_result, spam_reason = is_spam(tb_email.headers, spam_rules) if spam_rules else (False, None)
+            if is_spam_result:
                 email_record = Email(
                     message_id=tb_email.message_id,
                     folder_id=folder_name,
@@ -326,7 +327,7 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
                     from_addr=tb_email.from_addr,
                     mbox_path=tb_email.mbox_path,
                     is_spam=True,
-                    spam_reason="header_rule",
+                    spam_reason=spam_reason,
                     processed_at=datetime.now(),
                 )
                 db.insert_email(email_record)
