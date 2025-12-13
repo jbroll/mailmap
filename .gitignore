@@ -39,7 +39,6 @@ htmlcov/
 
 # Project specific
 config.toml
-categories.txt
 *.db
 mailmap.db
 *.xpi

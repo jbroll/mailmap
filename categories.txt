@@ -1,0 +1,90 @@
+# Email Classification Categories
+# Format: CategoryName: Description
+#
+# Edit this file to customize categories. The LLM will use these
+# descriptions to classify emails into the appropriate category.
+
+Financial: Investment and brokerage communications ONLY. Includes trade
+confirmations, tax documents (1099s, W-2s), dividend notices, portfolio reviews,
+and financial advisor newsletters from brokerages (Schwab, Fidelity, Vanguard).
+Does NOT include payment receipts, billing confirmations, or donation receipts -
+those belong in Receipts. Does NOT include credit card statements or bank
+transaction alerts - those are AccountSecurity or Receipts.
+
+OnlineServices: Digital subscriptions and online service billing. Includes
+hosting invoices (DigitalOcean, AWS, Linode), domain renewals (GoDaddy,
+Namecheap), software subscriptions (Microsoft 365, Adobe, JetBrains),
+streaming services (Netflix, Spotify), and cloud platform billing.
+
+Receipts: Payment receipts, invoices, and payment confirmations for ANY purchase
+or payment. Includes retail receipts, PayPal/Venmo transactions, vendor invoices,
+refund confirmations, donation receipts (ActBlue, charities, nonprofits),
+healthcare payment confirmations, automatic payment notifications, cloud service
+payments (Google Cloud, AWS), and any "thank you for your payment" emails. If it
+confirms a payment was made, it's a Receipt.
+
+AccountSecurity: Security alerts, account access, and verification notifications.
+Includes password reset requests, two-factor authentication codes, login alerts,
+suspicious activity warnings, email verification requests, "confirm your email"
+messages, account activation links, and verification codes from new signups.
+
+Orders: Order confirmations and shipping notifications. Includes purchase
+confirmations, shipping updates, delivery notifications, tracking information,
+and order status updates from online and retail purchases.
+
+Shopping: Automated shopping communications FROM RETAILERS. Includes cart
+reminders, wishlist updates, back-in-stock alerts, price drop notifications,
+and browsing-related emails from online stores (Amazon, eBay, etc). Does NOT
+include personal emails where friends discuss products or purchases casually.
+
+Promotions: Marketing promotions, deals, and coupons. Includes discount offers,
+sale announcements, promotional codes, special offers, loyalty rewards, and
+advertising emails.
+
+Events: Event invitations and notifications. Includes party invites, meeting
+requests, calendar invitations, event reminders, RSVPs, webinar invitations,
+and updates about scheduled events.
+
+Personal: Personal communications from friends and family. This category takes
+PRIORITY over topic-based categories when the sender is a person (not a business
+or automated system). Includes personal emails, casual conversations, family
+updates, discussions about any topic between friends, and non-automated messages
+from individual email addresses. If an email is from a person discussing
+repairs, shopping, travel, or any other topic casually, classify as Personal.
+
+SocialMedia: Social media and community notifications. Includes Facebook,
+Instagram, Twitter/X, LinkedIn notifications, forum updates, group messages,
+friend requests, likes, comments, and community digest emails.
+
+Healthcare: Medical and health-related communications. Includes appointment
+reminders, patient portal messages, test results, prescription notifications,
+health insurance, fitness class bookings, and wellness program updates.
+
+Career: Work and career-related communications. Includes job alerts, recruiter
+messages, professional development, LinkedIn job notifications, resume updates,
+and career opportunity emails.
+
+ProductUpdates: Product announcements and release notifications. Includes
+software updates, new feature announcements, product launches, changelog
+notifications, and technology news from companies and services you use.
+
+TechSupport: Technical support and help desk communications. Includes support
+ticket updates, troubleshooting responses, bug reports, feature requests, and
+customer service correspondence for technical issues.
+
+Newsletters: Newsletters, news digests, and editorial content. Includes email
+newsletters, news roundups, blog digests, article recommendations, and
+subscription-based informational content.
+
+FeedbackRequests: Surveys and feedback requests. Includes customer satisfaction
+surveys, product review requests, NPS surveys, feedback forms, and rating
+requests.
+
+Travel: Travel and transportation communications. Includes flight confirmations,
+hotel bookings, rental car reservations, travel itineraries, boarding passes,
+trip updates, and transportation service notifications.
+
+HomeImprovement: Home improvement and maintenance communications FROM BUSINESSES.
+Includes contractor quotes, home service appointments, hardware store emails
+(Home Depot, Lowes, Ace), plumber/electrician/HVAC service communications, and
+home warranty providers. Does NOT include personal emails discussing home topics.
