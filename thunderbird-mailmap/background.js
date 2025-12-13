@@ -26,12 +26,11 @@ const actionHandlers = {
     const { accountId } = params;
 
     if (accountId) {
-      // Get folders for specific account
-      const account = await browser.accounts.get(accountId);
+      const account = await resolveAccount(accountId);
       if (!account) {
         throw new Error(`Account not found: ${accountId}`);
       }
-      return { folders: flattenFolders(account.folders, accountId) };
+      return { folders: flattenFolders(account.folders, account.id) };
     }
 
     // Get folders for all accounts
@@ -122,17 +121,7 @@ const actionHandlers = {
   deleteFolder: async (params) => {
     const { accountId, path } = params;
 
-    // Resolve account by type alias or ID
-    const accounts = await browser.accounts.list();
-    let account;
-    if (accountId === "local") {
-      account = accounts.find(a => a.type === "none");
-    } else if (accountId === "imap") {
-      account = accounts.find(a => a.type === "imap");
-    } else {
-      account = await browser.accounts.get(accountId);
-    }
-
+    const account = await resolveAccount(accountId);
     if (!account) {
       throw new Error(`Account not found: ${accountId}`);
     }
@@ -304,6 +293,20 @@ async function resolveHeaderMessageIds(headerMessageIds) {
   return { tbIds, notFound };
 }
 
+// Helper: Resolve account by ID or alias ("local", "imap")
+async function resolveAccount(accountId) {
+  const accounts = await browser.accounts.list();
+  if (accountId === "local") {
+    return accounts.find(a => a.type === "none");
+  } else if (accountId === "imap") {
+    return accounts.find(a => a.type === "imap");
+  } else if (accountId) {
+    return browser.accounts.get(accountId);
+  }
+  // Default to Local Folders
+  return accounts.find(a => a.type === "none") || accounts[0];
+}
+
 // Helper: Flatten nested folder structure
 function flattenFolders(folders, accountId, parentPath = "") {
   const result = [];
@@ -351,21 +354,8 @@ async function findFolder(spec) {
 async function findOrCreateFolder(spec) {
   const accountId = spec.accountId;
   const path = spec.path || spec;
-  const accounts = await browser.accounts.list();
 
-  // Determine target account first
-  let targetAccount;
-  if (accountId === "local") {
-    targetAccount = accounts.find(a => a.type === "none");
-  } else if (accountId === "imap") {
-    targetAccount = accounts.find(a => a.type === "imap");
-  } else if (accountId) {
-    targetAccount = await browser.accounts.get(accountId);
-  } else {
-    // Default to Local Folders
-    targetAccount = accounts.find(a => a.type === "none") || accounts[0];
-  }
-
+  const targetAccount = await resolveAccount(accountId);
   if (!targetAccount) {
     throw new Error("No target account found");
   }
