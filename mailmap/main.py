@@ -552,6 +552,51 @@ def list_folders_cmd(db: Database) -> None:
         db.close()
 
 
+def summary_cmd(db: Database) -> None:
+    """Show classification summary with counts per category."""
+    db.connect()
+    db.init_schema()
+    try:
+        # Get total counts
+        total = db.conn.execute("SELECT COUNT(*) FROM emails").fetchone()[0]
+        classified = db.conn.execute(
+            "SELECT COUNT(*) FROM emails WHERE classification IS NOT NULL"
+        ).fetchone()[0]
+        unclassified = total - classified
+
+        # Get counts per classification
+        rows = db.conn.execute(
+            """
+            SELECT classification, COUNT(*) as count
+            FROM emails
+            WHERE classification IS NOT NULL
+            GROUP BY classification
+            ORDER BY count DESC
+            """
+        ).fetchall()
+
+        if not rows:
+            print("No classified emails found.")
+            return
+
+        print(f"{'Category':<35} {'Count':>8} {'Percent':>8}")
+        print("-" * 53)
+
+        for row in rows:
+            category = (row["classification"] or "")[:33]
+            count = row["count"]
+            pct = 100 * count / total if total > 0 else 0
+            print(f"{category:<35} {count:>8} {pct:>7.1f}%")
+
+        print("-" * 53)
+        print(f"{'Classified':<35} {classified:>8} {100*classified/total if total else 0:>7.1f}%")
+        if unclassified > 0:
+            print(f"{'Unclassified':<35} {unclassified:>8} {100*unclassified/total if total else 0:>7.1f}%")
+        print(f"{'Total':<35} {total:>8}")
+    finally:
+        db.close()
+
+
 async def init_folders_from_samples(config: Config, db: Database) -> None:
     """Analyze sample emails iteratively in batches to build folder structure."""
     tb_config = config.thunderbird
@@ -954,6 +999,10 @@ def main() -> None:
     folders_parser = subparsers.add_parser("folders", help="List folders and descriptions")
     add_common_args(folders_parser)
 
+    # summary - Classification summary
+    summary_parser = subparsers.add_parser("summary", help="Show classification summary with counts")
+    add_common_args(summary_parser)
+
     # reset - Reset database
     reset_parser = subparsers.add_parser("reset", help="Delete database and start fresh")
     add_common_args(reset_parser)
@@ -983,6 +1032,8 @@ def main() -> None:
         list_classifications(db, limit=limit)
     elif args.command == "folders":
         list_folders_cmd(db)
+    elif args.command == "summary":
+        summary_cmd(db)
     elif args.command == "init":
         asyncio.run(run_init_folders(config, db))
     elif args.command == "learn":

@@ -53,6 +53,9 @@ mailmap list --limit 100
 # List folders and descriptions
 mailmap folders
 
+# Show classification summary with counts per category
+mailmap summary
+
 # Reset database (delete and start fresh)
 mailmap reset
 ```
