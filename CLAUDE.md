@@ -31,10 +31,14 @@ mailmap daemon
 
 # Learn categories from existing Thunderbird folder structure
 # Generates descriptions and saves to categories.txt
-mailmap learn --server outlook.office365.com
+mailmap learn
 
 # Bulk classify emails from Thunderbird using categories.txt
-mailmap classify --server outlook.office365.com --limit 1000
+mailmap classify --limit 1000
+
+# Classify specific folder (use server:folder if folder exists in multiple accounts)
+mailmap classify --folder INBOX --limit 50
+mailmap classify --folder outlook.office365.com:INBOX --limit 50
 
 # Classify and copy to Thunderbird Local Folders (via extension)
 mailmap classify --folder INBOX --limit 50 --copy --target-account local
@@ -43,7 +47,7 @@ mailmap classify --folder INBOX --limit 50 --copy --target-account local
 mailmap classify --folder INBOX --limit 50 --move --target-account imap
 
 # Analyze emails and suggest new folder structure (saves to categories.txt)
-mailmap init --server outlook.office365.com --limit 500
+mailmap init --limit 500
 
 # Upload classified emails to IMAP folders
 mailmap upload
@@ -76,12 +80,12 @@ mailmap cleanup --target-account imap  # Delete from IMAP account
 
 ```bash
 # 1. Learn categories from your existing Thunderbird folders
-mailmap learn --server outlook.office365.com
+mailmap learn
 
 # 2. Edit categories.txt as needed (human/LLM-friendly format)
 
 # 3. Classify emails using those categories
-mailmap classify --server outlook.office365.com --limit 500
+mailmap classify --limit 500
 
 # 4. Review results
 mailmap summary
@@ -105,11 +109,13 @@ All subcommands support:
 Thunderbird subcommands (learn/classify/init) also support:
 ```bash
 --profile PATH         # Thunderbird profile path
---server NAME          # Filter to specific IMAP server
---folder NAME          # Process only this folder (e.g., INBOX)
+--folder SPEC          # Process only this folder (e.g., INBOX or server:INBOX)
 --limit N              # Max emails (integer) or percentage (0.1 = 10%)
 --random               # Randomly sample instead of sequential
 ```
+
+Note: If a folder name exists in multiple accounts, use `server:folder` syntax
+(e.g., `outlook.office365.com:INBOX`) to disambiguate.
 
 Classify command also supports (requires Thunderbird extension):
 ```bash

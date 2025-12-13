@@ -79,6 +79,29 @@ def mock_profile_with_subfolders(temp_dir):
     return profile
 
 
+@pytest.fixture
+def mock_profile_multiple_accounts(temp_dir):
+    """Create a mock profile with multiple IMAP accounts having the same folder."""
+    profile = temp_dir / "multi.default"
+    profile.mkdir()
+
+    # First account
+    imap1 = profile / "ImapMail" / "imap.gmail.com"
+    imap1.mkdir(parents=True)
+    (imap1 / "INBOX").touch()
+    (imap1 / "INBOX.msf").touch()
+
+    # Second account
+    imap2 = profile / "ImapMail" / "outlook.office365.com"
+    imap2.mkdir(parents=True)
+    (imap2 / "INBOX").touch()
+    (imap2 / "INBOX.msf").touch()
+    (imap2 / "Drafts").touch()
+    (imap2 / "Drafts.msf").touch()
+
+    return profile
+
+
 class TestThunderbirdEmail:
     def test_dataclass(self):
         email = ThunderbirdEmail(
@@ -179,6 +202,12 @@ class TestThunderbirdReader:
         assert len(emails) == 2
         assert all(isinstance(e, ThunderbirdEmail) for e in emails)
 
+    def test_read_folder_with_server_prefix(self, mock_thunderbird_profile):
+        reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
+        emails = list(reader.read_folder("imap.example.com:INBOX"))
+
+        assert len(emails) == 2
+
     def test_read_folder_with_limit(self, mock_thunderbird_profile):
         reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
         emails = list(reader.read_folder("INBOX", limit=1))
@@ -191,6 +220,32 @@ class TestThunderbirdReader:
 
         assert len(samples) == 2  # Only 2 emails in mock
         assert all(isinstance(e, ThunderbirdEmail) for e in samples)
+
+    def test_resolve_folder(self, mock_thunderbird_profile):
+        reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
+        server, folder = reader.resolve_folder("INBOX")
+
+        assert server == "imap.example.com"
+        assert folder == "INBOX"
+
+    def test_resolve_folder_with_prefix(self, mock_thunderbird_profile):
+        reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
+        server, folder = reader.resolve_folder("imap.example.com:Sent")
+
+        assert server == "imap.example.com"
+        assert folder == "Sent"
+
+    def test_resolve_folder_not_found(self, mock_thunderbird_profile):
+        reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
+        with pytest.raises(ValueError, match="Folder 'Nonexistent' not found"):
+            reader.resolve_folder("Nonexistent")
+
+    def test_list_folders_qualified(self, mock_thunderbird_profile):
+        reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
+        folders = reader.list_folders_qualified()
+
+        assert "imap.example.com:INBOX" in folders
+        assert "imap.example.com:Sent" in folders
 
     def test_server_filter(self, mock_thunderbird_profile):
         reader = ThunderbirdReader(
@@ -216,3 +271,35 @@ class TestThunderbirdReader:
 
         # 2 emails in INBOX, 0 in Sent
         assert len(emails) == 2
+
+    def test_resolve_folder_ambiguous(self, mock_profile_multiple_accounts):
+        """Test that ambiguous folder names raise an error."""
+        reader = ThunderbirdReader(profile_path=mock_profile_multiple_accounts)
+        with pytest.raises(ValueError, match="found in multiple accounts"):
+            reader.resolve_folder("INBOX")
+
+    def test_resolve_folder_ambiguous_with_prefix(self, mock_profile_multiple_accounts):
+        """Test that server:folder syntax resolves ambiguity."""
+        reader = ThunderbirdReader(profile_path=mock_profile_multiple_accounts)
+        server, folder = reader.resolve_folder("imap.gmail.com:INBOX")
+
+        assert server == "imap.gmail.com"
+        assert folder == "INBOX"
+
+    def test_resolve_unique_folder(self, mock_profile_multiple_accounts):
+        """Test that unique folder names work without prefix."""
+        reader = ThunderbirdReader(profile_path=mock_profile_multiple_accounts)
+        server, folder = reader.resolve_folder("Drafts")
+
+        assert server == "outlook.office365.com"
+        assert folder == "Drafts"
+
+    def test_list_folders_qualified_multiple_accounts(self, mock_profile_multiple_accounts):
+        """Test qualified folder listing with multiple accounts."""
+        reader = ThunderbirdReader(profile_path=mock_profile_multiple_accounts)
+        folders = reader.list_folders_qualified()
+
+        assert "imap.gmail.com:INBOX" in folders
+        assert "outlook.office365.com:INBOX" in folders
+        assert "outlook.office365.com:Drafts" in folders
+        assert len(folders) == 3

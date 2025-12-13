@@ -1,16 +1,117 @@
-You are an email classification assistant. Classify the following email into the most appropriate folder.
+You are an email classification assistant. Your task is to classify emails into the most appropriate folder.
 
-Available folders and their descriptions:
+CLASSIFICATION FRAMEWORK:
+
+First, identify the PRIMARY SIGNAL (what makes this email fundamentally different from others):
+1. WHO is the sender?
+   - Individual person → likely Personal
+   - Financial institution (bank, brokerage, credit card) → likely Financial
+   - Retail/commerce company → likely Shopping, Promotions, Orders, or Receipts
+   - Online service/platform → likely OnlineServices
+   - Healthcare provider → likely Healthcare
+   - Social media platform → likely SocialMedia
+
+2. WHAT is the primary intent?
+   - Person-to-person communication → Personal (HIGHEST PRIORITY)
+   - Account/investment status from financial institution → Financial
+   - Transaction confirmation (payment received/processed) → Receipts
+   - Order status (shipped, delivered, tracking) → Orders
+   - Selling/promoting products → Shopping or Promotions
+   - Service account updates → OnlineServices
+   - Security action required → AccountSecurity
+   - Scheduled event → Events
+   - Editorial content → Newsletters
+
+3. Apply DECISION RULES for ambiguous cases:
+   - Payment from non-financial company (DigitalOcean, AWS, utility) → Receipts (NOT Financial)
+   - Financial institution monthly statement or account summary → Financial (NOT Receipts)
+   - Product marketing with discount → Promotions (NOT Shopping)
+   - Product availability notification → Shopping (NOT Promotions)
+   - Order confirmation with payment → Orders (NOT Receipts)
+   - Receipt after order fulfilled → Receipts (NOT Orders)
+
+Available folders:
 {folders_text}
 
-Email to classify:
+EXAMPLES:
+
+Email: From: billing@digitalocean.com | Subject: Payment received - $12.58
+Body: Thank you for your payment of $12.58 for your cloud services.
+
+Reasoning:
+1. Sender: DigitalOcean (online cloud service, NOT a financial institution)
+2. Intent: Confirming a payment was received (transactional)
+3. Decision: This is a payment receipt from a service provider, not a financial account communication
+Classification: {{"predicted_folder": "Receipts", "secondary_labels": ["OnlineServices"], "confidence": 0.95}}
+
+Email: From: statements@schwab.com | Subject: Your monthly statement is ready
+Body: Your brokerage account statement for November is now available.
+
+Reasoning:
+1. Sender: Charles Schwab (financial institution - brokerage)
+2. Intent: Informing about account status/statement
+3. Decision: This is account communication from a financial institution
+Classification: {{"predicted_folder": "Financial", "secondary_labels": [], "confidence": 0.95}}
+
+Email: From: jane.smith@gmail.com | Subject: Re: Dinner plans Saturday?
+Body: Hey! Yes, I'm free on Saturday. Want to try that new Italian place?
+
+Reasoning:
+1. Sender: Individual person (personal email address)
+2. Intent: Personal correspondence about dinner plans
+3. Decision: Person-to-person communication takes priority over topic (Events)
+Classification: {{"predicted_folder": "Personal", "secondary_labels": [], "confidence": 0.98}}
+
+Email: From: orders@amazon.com | Subject: Your order has shipped
+Body: Your order #123-4567890 has shipped. Track your package here.
+
+Reasoning:
+1. Sender: Amazon (retail company)
+2. Intent: Informing about order status (shipped)
+3. Decision: This is order lifecycle communication, not a receipt
+Classification: {{"predicted_folder": "Orders", "secondary_labels": [], "confidence": 0.95}}
+
+Email: From: deals@bestbuy.com | Subject: FLASH SALE: 50% off laptops - TODAY ONLY!
+Body: Don't miss out! Limited time offer on select laptops.
+
+Reasoning:
+1. Sender: Best Buy (retailer)
+2. Intent: Promoting products with discount offer
+3. Decision: Marketing message with time-sensitive promotion
+Classification: {{"predicted_folder": "Promotions", "secondary_labels": ["Shopping"], "confidence": 0.90}}
+
+Email: From: noreply@stripe.com | Subject: Your Stripe account: Payment method expiring soon
+Body: The credit card ending in 4242 will expire next month. Please update your payment method.
+
+Reasoning:
+1. Sender: Stripe (online payment service)
+2. Intent: Notifying about account status (payment method expiring)
+3. Decision: Service account update, not a financial account communication
+Classification: {{"predicted_folder": "OnlineServices", "secondary_labels": ["AccountSecurity"], "confidence": 0.85}}
+
+Email: From: newsletter@techcrunch.com | Subject: TC Daily: AI startups raise $2B this quarter
+Body: Here are today's top technology news stories...
+
+Reasoning:
+1. Sender: TechCrunch (publication)
+2. Intent: Delivering editorial content (news digest)
+3. Decision: This is informational content, not marketing
+Classification: {{"predicted_folder": "Newsletters", "secondary_labels": [], "confidence": 0.95}}
+
+Email: From: events@meetup.com | Subject: You're invited: Python Developers Meetup - Dec 15
+Body: Join us for our monthly Python meetup! Dec 15, 7pm at TechHub.
+
+Reasoning:
+1. Sender: Meetup platform (automated event notification)
+2. Intent: Inviting to a scheduled event
+3. Decision: Event invitation, even though it's platform-generated
+Classification: {{"predicted_folder": "Events", "secondary_labels": [], "confidence": 0.90}}
+
+Now classify this email following the same reasoning process:
+
 From: {from_addr}
 Subject: {subject}
 Body: {body}
 
-Respond with a JSON object containing:
-- "predicted_folder": the folder_id that best matches this email
-- "secondary_labels": a list of up to 3 relevant category labels
-- "confidence": a number from 0 to 1 indicating classification confidence
-
-JSON response:
+Respond with your reasoning, then the classification as a JSON object:
+{{"predicted_folder": "...", "secondary_labels": [...], "confidence": ...}}

@@ -1,52 +1,103 @@
 # Email Classification Categories
 # Format: CategoryName: Description
 #
-# Edit this file to customize categories. The LLM will use these
-# descriptions to classify emails into the appropriate category.
+# These descriptions use a DISCRIMINATIVE approach - they focus on what makes
+# each category unique rather than listing everything it contains. The LLM
+# uses these alongside the classification prompt's decision framework.
 
-Financial: Communications from banks, brokerages, and financial institutions
-about your accounts, investments, loans, or tax documents.
+Financial: Communications FROM financial institutions (banks, brokerages, credit
+unions, investment firms, credit card companies) ABOUT your accounts, statements,
+investments, loans, or tax documents. The sender must be a company whose primary
+business is managing money. NOT payment receipts from regular companies like
+utilities, cloud services, or retailers - those go to Receipts.
 
-OnlineServices: Communications from online services and platforms you use about
-billing, account status, policy changes, or feature updates.
+OnlineServices: Account updates and notifications FROM online platforms and
+digital services (cloud providers, SaaS tools, hosting, domain registrars,
+subscription services) ABOUT billing, features, policy changes, or account
+status. These are service providers, not financial institutions. Includes
+companies like DigitalOcean, AWS, Stripe, GitHub, Dropbox. NOT transaction
+receipts - those go to Receipts.
 
-Receipts: Invoices and payment confirmations. Includes bills, invoices,
-purchase receipts, donation acknowledgments, and payment confirmations.
+Receipts: Payment confirmations and invoices FROM any company (except financial
+institutions) AFTER a transaction has been completed. The primary intent is
+confirming "we received your payment" or "here's your bill." Includes utility
+bills, donation receipts, subscription charges, and "payment processed"
+notifications. NOT order status updates (those go to Orders) and NOT monthly
+account statements from banks (those go to Financial).
 
-AccountSecurity: Security and authentication messages. Password resets,
-verification codes, login alerts, and suspicious activity warnings.
+AccountSecurity: Security-critical messages requiring immediate attention or
+action. Password reset requests, two-factor authentication codes, login alerts,
+suspicious activity warnings, account lockout notifications, and verification
+emails. The defining characteristic is security urgency - these emails exist to
+protect account access. NOT routine account updates about features or billing.
 
-Orders: Order lifecycle communications. Purchase confirmations, shipping
-updates, delivery notifications, and tracking information.
+Orders: Order lifecycle communications FROM retailers ABOUT the physical or
+digital delivery of purchased items. Shipping confirmations, tracking numbers,
+delivery notifications, "your order has shipped" messages, and package updates.
+The focus is on fulfillment status, not payment. NOT the initial purchase receipt
+(that's Receipts) and NOT marketing about products you haven't ordered yet.
 
-Shopping: Retailers trying to sell you products. Cart reminders, product
-announcements, back-in-stock alerts, and personalized recommendations.
+Shopping: Product-focused messages FROM retailers ABOUT product availability,
+recommendations, or inventory. Back-in-stock alerts, abandoned cart reminders,
+product launch announcements, personalized recommendations, and "you might like"
+suggestions. The intent is getting you interested in products, not offering
+discounts. NOT promotional emails with sales/discounts (those go to Promotions).
 
-Promotions: Marketing messages. Discount offers, sales, coupons, loyalty
-programs, and surveys requesting feedback.
+Promotions: Marketing messages FROM any company ABOUT sales, discounts, limited-
+time offers, or special deals. Coupons, flash sales, "50% off," loyalty program
+rewards, clearance events, and customer satisfaction surveys. The defining feature
+is an incentive to act (discount, deal, reward). NOT product availability
+notifications without discounts (those go to Shopping).
 
-Events: Invitations and updates about scheduled events. Party invites,
-meeting requests, calendar items, and event reminders.
+Events: Invitations and updates ABOUT scheduled events with specific dates/times.
+Meeting invitations, calendar notifications, party invites, webinar registrations,
+conference announcements, and event reminders from any source (platforms or
+individuals). The defining feature is a scheduled gathering or appointment. NOT
+healthcare appointments (those go to Healthcare) and NOT general social
+correspondence (that goes to Personal).
 
-Personal: Direct communications from individuals. Emails where the sender is a
-person (not a company or automated system) discussing any topic. This category
-takes PRIORITY over topic-based categories for person-to-person messages.
+Personal: Direct person-to-person communication FROM individual humans (not
+companies or automated systems) ABOUT any topic. The sender is a real person
+using their personal email, and the message is conversational correspondence.
+This category takes HIGHEST PRIORITY - even if discussing work topics, if it's
+from an individual person communicating personally, it goes here. NOT automated
+platform messages, company communications, or newsletters from individuals.
 
-SocialMedia: Notifications from social media platforms about activity on your
-accounts. Likes, comments, friend requests, and messages from the platform.
+SocialMedia: Automated notifications FROM social media platforms (Facebook,
+LinkedIn, Twitter, Instagram, etc.) ABOUT activity on your account. Likes,
+comments, friend requests, connection requests, mentions, tags, and "you have
+new messages" alerts. These are platform-generated notifications, not the actual
+personal messages themselves. NOT messages from individuals (those go to Personal).
 
-Healthcare: Medical and health-related communications. Appointments, test
-results, prescriptions, patient portal messages, and wellness programs.
+Healthcare: Medical and health-related communications FROM healthcare providers,
+medical facilities, insurance companies, pharmacies, or patient portals ABOUT
+your health, appointments, test results, or medical billing. The sender must be
+part of the healthcare system. Includes appointment reminders, prescription
+notifications, test results, medical bills, and insurance claims. NOT general
+wellness newsletters or fitness app notifications.
 
-Career: Job and career-related messages. Job alerts, recruiter outreach,
-interview requests, and professional development.
+Career: Professional development and job-seeking communications ABOUT employment
+opportunities, recruiting, or career advancement. Job alerts, recruiter outreach,
+interview requests, application status updates, professional networking on
+LinkedIn (messages, not notifications), and career coaching. The defining intent
+is employment-related opportunity. NOT routine work emails from colleagues
+(those go to Personal if from individuals).
 
-TechSupport: Customer support communications. Support tickets, troubleshooting
-responses, and help desk correspondence.
+TechSupport: Customer support interactions ABOUT resolving a specific problem
+or issue. Support ticket updates, troubleshooting responses, help desk replies,
+and case status notifications. These emails exist because you reported a problem
+and are seeking assistance. The defining feature is reactive problem-solving.
+NOT proactive service updates or account notifications (those go to OnlineServices).
 
-Newsletters: Editorial content you subscribe to. News digests, blog posts,
-articles, and informational updates from publications or creators.
+Newsletters: Editorial and informational content you subscribed to FROM
+publications, blogs, creators, or media organizations. News digests, curated
+articles, industry updates, thought leadership, and educational content. The
+primary intent is delivering information or knowledge, not selling products.
+NOT marketing emails with promotional offers (those go to Promotions) and NOT
+transactional service updates (those go to OnlineServices).
 
-Travel: Trip-related communications. Flight confirmations, hotel bookings,
-itineraries, boarding passes, and transportation updates.
-
+Travel: Trip-related confirmations and updates ABOUT transportation and
+accommodations. Flight confirmations, hotel reservations, car rental bookings,
+boarding passes, itineraries, gate changes, and travel insurance. The defining
+feature is related to a specific trip or journey. Includes airlines, hotels,
+vacation rentals, ride-sharing, and travel booking platforms.

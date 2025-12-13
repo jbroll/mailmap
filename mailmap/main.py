@@ -178,21 +178,31 @@ async def learn_from_existing_folders(config: Config) -> None:
 
     logger.info("Learning from existing folder structure...")
     try:
-        reader = ThunderbirdReader(profile_path, tb_config.server_filter)
+        reader = ThunderbirdReader(profile_path)
     except ValueError as e:
         logger.error(f"Failed to initialize Thunderbird reader: {e}")
         return
 
     logger.info(f"Found Thunderbird profile: {reader.profile_path}")
 
-    # Get all folders and filter out system folders
-    all_folders = reader.list_folders()
-    user_folders = [f for f in all_folders if not is_system_folder(f)]
-    system_folders = [f for f in all_folders if is_system_folder(f)]
+    # Get all folders (qualified) and extract unique folder names
+    all_qualified = reader.list_folders_qualified()
+    # Extract unique folder names (without server prefix)
+    seen_names = set()
+    user_folders = []
+    for qualified in all_qualified:
+        _, folder_name = qualified.split(":", 1) if ":" in qualified else (None, qualified)
+        if folder_name not in seen_names and not is_system_folder(folder_name):
+            seen_names.add(folder_name)
+            user_folders.append((qualified, folder_name))
 
-    logger.info(f"Found {len(all_folders)} total folders")
+    system_folders = [f.split(":", 1)[1] if ":" in f else f for f in all_qualified
+                      if is_system_folder(f.split(":", 1)[1] if ":" in f else f)]
+    system_folders = list(set(system_folders))
+
+    logger.info(f"Found {len(all_qualified)} total folders")
     logger.info(f"System folders (excluded): {system_folders}")
-    logger.info(f"User folders to learn from: {user_folders}")
+    logger.info(f"User folders to learn from: {[name for _, name in user_folders]}")
 
     if not user_folders:
         logger.warning("No user folders found to learn from")
@@ -204,7 +214,7 @@ async def learn_from_existing_folders(config: Config) -> None:
     existing_names = {cat.name for cat in existing_categories}
     new_categories = []
 
-    for folder_name in user_folders:
+    for folder_spec, folder_name in user_folders:
         # Skip if category already exists
         if folder_name in existing_names:
             logger.info(f"Category '{folder_name}' already exists, skipping")
@@ -214,7 +224,7 @@ async def learn_from_existing_folders(config: Config) -> None:
 
         # Sample emails from this folder for description generation
         samples = reader.get_sample_emails(
-            folder_name,
+            folder_spec,
             count=tb_config.samples_per_folder,
         )
 
@@ -296,7 +306,7 @@ async def bulk_classify_from_thunderbird(
     # Initialize Thunderbird reader
     logger.info("Initializing Thunderbird reader...")
     try:
-        reader = ThunderbirdReader(profile_path, tb_config.server_filter)
+        reader = ThunderbirdReader(profile_path)
     except ValueError as e:
         logger.error(f"Failed to initialize Thunderbird reader: {e}")
         return classifications
@@ -304,14 +314,19 @@ async def bulk_classify_from_thunderbird(
     logger.info(f"Found Thunderbird profile: {reader.profile_path}")
 
     # Get folders to process
-    all_folders = reader.list_folders()
     if tb_config.folder_filter:
-        folders = [f for f in all_folders if f == tb_config.folder_filter]
-        if not folders:
-            logger.error(f"Folder '{tb_config.folder_filter}' not found")
+        # Validate folder upfront (will error if ambiguous)
+        try:
+            server, folder_name = reader.resolve_folder(tb_config.folder_filter)
+            # Use server:folder format for unambiguous access
+            folders = [f"{server}:{folder_name}"]
+            logger.info(f"Processing folder: {folder_name} (from {server})")
+        except ValueError as e:
+            logger.error(str(e))
             return classifications
     else:
-        folders = all_folders
+        # Get all folders with server prefix to avoid ambiguity
+        folders = reader.list_folders_qualified()
 
     # Load spam rules
     spam_rules = parse_rules(config.spam.rules) if config.spam.enabled else []
@@ -326,21 +341,27 @@ async def bulk_classify_from_thunderbird(
     action_verb = "Moving" if move else "Copying"
     action_past = "moved" if move else "copied"
 
-    for folder_name in folders:
+    for folder_spec in folders:
+        # Extract folder name for display and skip checks
+        if ":" in folder_spec:
+            _, folder_name = folder_spec.split(":", 1)
+        else:
+            folder_name = folder_spec
+
         # Skip spam folders
         if config.spam.enabled and folder_name in config.spam.skip_folders:
-            logger.info(f"Skipping spam folder: {folder_name}")
+            logger.info(f"Skipping spam folder: {folder_spec}")
             continue
 
-        logger.info(f"Processing folder: {folder_name}")
+        logger.info(f"Processing folder: {folder_spec}")
         folder_count = 0
 
         # Choose between random sampling and sequential reading
         limit = int(tb_config.import_limit) if isinstance(tb_config.import_limit, (int, float)) else None
         if tb_config.random_sample and limit:
-            email_iterator = reader.read_folder_random(folder_name, limit)
+            email_iterator = reader.read_folder_random(folder_spec, limit)
         else:
-            email_iterator = reader.read_folder(folder_name, limit=limit)
+            email_iterator = reader.read_folder(folder_spec, limit=limit)
 
         for tb_email in email_iterator:
             # Check if already processed
@@ -736,7 +757,7 @@ async def init_folders_from_samples(config: Config) -> None:
     logger.info("Initializing folder structure from email samples (iterative batching)...")
 
     try:
-        reader = ThunderbirdReader(profile_path, tb_config.server_filter)
+        reader = ThunderbirdReader(profile_path)
     except ValueError as e:
         logger.error(f"Failed to initialize Thunderbird reader: {e}")
         return
@@ -744,34 +765,37 @@ async def init_folders_from_samples(config: Config) -> None:
     logger.info(f"Reading emails from Thunderbird profile: {reader.profile_path}")
 
     # Determine which folders to read from
-    all_folders = reader.list_folders()
     if tb_config.folder_filter:
-        folders = [f for f in all_folders if f == tb_config.folder_filter]
-        if not folders:
-            logger.error(f"Folder '{tb_config.folder_filter}' not found. Available: {all_folders}")
+        # Validate folder upfront (will error if ambiguous)
+        try:
+            server, folder_name = reader.resolve_folder(tb_config.folder_filter)
+            folders = [f"{server}:{folder_name}"]
+            logger.info(f"Reading from folder: {folder_name} (from {server})")
+        except ValueError as e:
+            logger.error(str(e))
             return
-        logger.info(f"Reading from folder: {tb_config.folder_filter}")
     else:
-        folders = all_folders
+        # Get all folders with server prefix
+        folders = reader.list_folders_qualified()
 
     # Collect sample emails
     sample_limit = tb_config.init_sample_limit
     all_emails = []
 
-    for folder_name in folders:
+    for folder_spec in folders:
         # Use percentage or count based on sample_limit type
         if isinstance(sample_limit, float) and sample_limit < 1:
             # Percentage-based: use random sampling
-            emails = list(reader.read_folder_random(folder_name, sample_limit))
-            logger.info(f"Sampled {len(emails)} emails ({sample_limit:.0%}) from {folder_name}")
+            emails = list(reader.read_folder_random(folder_spec, sample_limit))
+            logger.info(f"Sampled {len(emails)} emails ({sample_limit:.0%}) from {folder_spec}")
         elif tb_config.random_sample:
             # Random sampling with count limit
             limit = int(sample_limit) if len(folders) == 1 else max(50, int(sample_limit) // len(folders))
-            emails = list(reader.read_folder_random(folder_name, limit))
+            emails = list(reader.read_folder_random(folder_spec, limit))
         else:
             # Sequential sampling
             limit = int(sample_limit) if len(folders) == 1 else max(50, int(sample_limit) // len(folders))
-            emails = list(reader.read_folder(folder_name, limit=limit))
+            emails = list(reader.read_folder(folder_spec, limit=limit))
 
         for email in emails:
             all_emails.append({
@@ -863,8 +887,6 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
         config.ollama.model = args.ollama_model
     if getattr(args, "thunderbird_profile", None):
         config.thunderbird.profile_path = args.thunderbird_profile
-    if getattr(args, "thunderbird_server", None):
-        config.thunderbird.server_filter = args.thunderbird_server
     if getattr(args, "thunderbird_folder", None):
         config.thunderbird.folder_filter = args.thunderbird_folder
     if getattr(args, "samples_per_folder", None) is not None:
@@ -1123,16 +1145,10 @@ def add_thunderbird_args(parser: argparse.ArgumentParser) -> None:
         help="Thunderbird profile path",
     )
     parser.add_argument(
-        "--server",
-        type=str,
-        dest="thunderbird_server",
-        help="Filter to specific IMAP server",
-    )
-    parser.add_argument(
         "--folder",
         type=str,
         dest="thunderbird_folder",
-        help="Process only this folder (e.g., INBOX)",
+        help="Process only this folder (e.g., INBOX or server.com:INBOX)",
     )
 
 
