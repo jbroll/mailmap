@@ -36,6 +36,12 @@ mailmap learn --server outlook.office365.com
 # Bulk classify emails from Thunderbird using categories.txt
 mailmap classify --server outlook.office365.com --limit 1000
 
+# Classify and copy to Thunderbird Local Folders (via extension)
+mailmap classify --folder INBOX --limit 50 --copy --target-account local
+
+# Classify and move to IMAP folders (via extension)
+mailmap classify --folder INBOX --limit 50 --move --target-account imap
+
 # Analyze emails and suggest new folder structure (saves to categories.txt)
 mailmap init --server outlook.office365.com --limit 500
 
@@ -60,6 +66,10 @@ mailmap clear --folder INBOX          # Only specific source folder
 
 # Reset database (delete and start fresh)
 mailmap reset
+
+# Delete classification folders from Thunderbird (via extension)
+mailmap cleanup                        # Delete from Local Folders
+mailmap cleanup --target-account imap  # Delete from IMAP account
 ```
 
 ## Typical Workflow
@@ -99,6 +109,13 @@ Thunderbird subcommands (learn/classify/init) also support:
 --folder NAME          # Process only this folder (e.g., INBOX)
 --limit N              # Max emails (integer) or percentage (0.1 = 10%)
 --random               # Randomly sample instead of sequential
+```
+
+Classify command also supports (requires Thunderbird extension):
+```bash
+--copy                 # Copy classified emails to target folders
+--move                 # Move classified emails to target folders
+--target-account TYPE  # Target: 'local' (default), 'imap', or account ID
 ```
 
 ## Testing
