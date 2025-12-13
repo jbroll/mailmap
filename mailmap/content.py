@@ -2,11 +2,25 @@
 
 import re
 
+import html2text
+
+# Configure html2text for email content
+_html2text = html2text.HTML2Text()
+_html2text.ignore_links = False  # Keep link text
+_html2text.ignore_images = True
+_html2text.ignore_emphasis = True
+_html2text.body_width = 0  # Don't wrap lines
+_html2text.skip_internal_links = True
+
 # Pre-compiled regex patterns for better performance
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
 _HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]+;')
 _HTML_NUMERIC_RE = re.compile(r'&#\d+;')
+_HTML_DETECT_RE = re.compile(r'<(html|body|div|p|table|tr|td|span|style|head|b|i|a|br|strong|em|ul|ol|li|h[1-6])\b', re.IGNORECASE)
 _URL_RE = re.compile(r'https?://\S+')
+_TABLE_CRUFT_RE = re.compile(r'^\s*\|[\s|]*$', re.MULTILINE)  # Empty table rows like "| | |"
+_TABLE_SEP_RE = re.compile(r'^\s*-{3,}\s*$', re.MULTILINE)  # Table separators "---"
+_MARKDOWN_LINK_RE = re.compile(r'\[([^\]]*)\]\([^)]*\)')  # [text](url) -> text
 _ON_WROTE_RE = re.compile(r'^On .+ wrote:?\s*$', re.IGNORECASE)
 _EMAIL_HEADER_RE = re.compile(r'^(From|Sent|To|Subject|Date|Cc|Bcc):\s')
 _MULTI_SPACE_RE = re.compile(r'[ \t]+')
@@ -31,7 +45,7 @@ def clean_email_content(body: str, max_length: int = 500) -> str:
     """Clean email content to reduce noise before sending to LLM.
 
     Removes:
-    - HTML tags
+    - HTML tags (using html2text for proper conversion)
     - Email signatures
     - Reply chains (quoted text)
     - Excessive whitespace
@@ -50,12 +64,18 @@ def clean_email_content(body: str, max_length: int = 500) -> str:
 
     text = body
 
-    # Remove HTML tags
-    text = _HTML_TAG_RE.sub(' ', text)
-
-    # Remove HTML entities
-    text = _HTML_ENTITY_RE.sub(' ', text)
-    text = _HTML_NUMERIC_RE.sub(' ', text)
+    # Use html2text for HTML content (much better than regex)
+    if _HTML_DETECT_RE.search(text):
+        text = _html2text.handle(text)
+        # Clean up markdown table cruft from html2text
+        text = _TABLE_CRUFT_RE.sub('', text)
+        text = _TABLE_SEP_RE.sub('', text)
+        # Convert markdown links [text](url) to just text
+        text = _MARKDOWN_LINK_RE.sub(r'\1', text)
+    else:
+        # Fallback for non-HTML: just clean entities
+        text = _HTML_ENTITY_RE.sub(' ', text)
+        text = _HTML_NUMERIC_RE.sub(' ', text)
 
     # Remove URLs (keep note that there was one)
     text = _URL_RE.sub('[URL]', text)

@@ -1,11 +1,14 @@
 """Main entry point and orchestration for mailmap."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import logging
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .categories import Category, get_category_descriptions, load_categories, save_categories
 from .config import Config, load_config
@@ -14,6 +17,9 @@ from .imap_client import EmailMessage, ImapListener, ImapMailbox
 from .llm import OllamaClient, SuggestedFolder
 from .spam import is_spam, parse_rules
 from .thunderbird import ThunderbirdReader
+
+if TYPE_CHECKING:
+    from .websocket_server import WebSocketServer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -245,12 +251,31 @@ async def run_learn_folders(config: Config) -> None:
     await learn_from_existing_folders(config)
 
 
-async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
+async def bulk_classify_from_thunderbird(
+    config: Config,
+    db: Database,
+    ws_server: WebSocketServer | None = None,
+    move: bool = False,
+    target_account: str = "local",
+) -> list[tuple[str, str]]:
     """Bulk classify emails from Thunderbird using existing categories.
 
     Reads emails from Thunderbird profile and classifies them using
     the categories defined in categories.txt.
+
+    Args:
+        config: Application configuration
+        db: Database instance
+        ws_server: Optional WebSocket server for immediate copy/move after classification
+        move: If True with ws_server, move messages; otherwise copy
+        target_account: Target account for folders when using ws_server
+
+    Returns:
+        List of (message_id, classification) tuples for successfully classified emails.
     """
+    from .protocol import Action
+
+    classifications: list[tuple[str, str]] = []
     tb_config = config.thunderbird
     profile_path = Path(tb_config.profile_path) if tb_config.profile_path else None
 
@@ -262,7 +287,7 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
     if not folder_descriptions:
         logger.error(f"No categories found in {categories_path}")
         logger.error("Run 'mailmap learn' first to generate categories")
-        return
+        return classifications
 
     logger.info(f"Loaded {len(folder_descriptions)} categories from {categories_path}")
 
@@ -272,7 +297,7 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
         reader = ThunderbirdReader(profile_path, tb_config.server_filter)
     except ValueError as e:
         logger.error(f"Failed to initialize Thunderbird reader: {e}")
-        return
+        return classifications
 
     logger.info(f"Found Thunderbird profile: {reader.profile_path}")
 
@@ -282,7 +307,7 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
         folders = [f for f in all_folders if f == tb_config.folder_filter]
         if not folders:
             logger.error(f"Folder '{tb_config.folder_filter}' not found")
-            return
+            return classifications
     else:
         folders = all_folders
 
@@ -291,7 +316,13 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
 
     total_imported = 0
     total_classified = 0
+    total_copied = 0
+    total_failed = 0
     total_spam = 0
+
+    action = Action.MOVE_MESSAGES if move else Action.COPY_MESSAGES
+    action_verb = "Moving" if move else "Copying"
+    action_past = "moved" if move else "copied"
 
     for folder_name in folders:
         # Skip spam folders
@@ -349,7 +380,7 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
             # Classify email
             try:
                 async with OllamaClient(config.ollama) as llm:
-                    classification = await llm.classify_email(
+                    result = await llm.classify_email(
                         tb_email.subject,
                         tb_email.from_addr,
                         tb_email.body_text,
@@ -357,25 +388,221 @@ async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
                     )
                 db.update_classification(
                     tb_email.message_id,
-                    classification.predicted_folder,
-                    classification.confidence,
+                    result.predicted_folder,
+                    result.confidence,
                 )
+                classifications.append((tb_email.message_id, result.predicted_folder))
                 total_classified += 1
+
+                # Immediately copy/move if WebSocket server is connected
+                if ws_server and ws_server.is_connected:
+                    target_folder_spec = {"path": result.predicted_folder, "accountId": target_account}
+                    response = await ws_server.send_request(
+                        action,
+                        {
+                            "headerMessageIds": [tb_email.message_id],
+                            "targetFolder": target_folder_spec,
+                        },
+                        timeout=30.0,
+                    )
+                    if response and response.ok:
+                        result_data = response.result or {}
+                        success_count = result_data.get("moved" if move else "copied", 0)
+                        total_copied += success_count
+                        if success_count:
+                            logger.info(f"  {action_past}: {tb_email.subject[:40]}... -> {result.predicted_folder}")
+                        else:
+                            not_found = result_data.get("notFound", [])
+                            if not_found:
+                                logger.warning(f"  Not found in Thunderbird: {tb_email.message_id}")
+                                total_failed += 1
+                    else:
+                        error = response.error if response else "No response"
+                        logger.error(f"  Failed to {action_verb.lower()}: {error}")
+                        total_failed += 1
+
             except Exception as e:
                 logger.warning(f"Failed to classify {tb_email.message_id}: {e}")
 
         logger.info(f"  Processed {folder_count} emails from {folder_name}")
 
     logger.info(f"Classification complete: {total_imported} imported, {total_classified} classified, {total_spam} spam")
+    if ws_server:
+        logger.info(f"Extension actions: {total_copied} {action_past}, {total_failed} failed")
+    return classifications
 
 
-async def run_bulk_classify(config: Config, db: Database) -> None:
-    """Run bulk classification mode."""
+async def send_to_extension(
+    config: Config,
+    classifications: list[tuple[str, str]],
+    move: bool = False,
+    target_account: str = "local",
+) -> None:
+    """Send copy/move commands to Thunderbird extension via WebSocket.
+
+    Args:
+        config: Application configuration
+        classifications: List of (message_id, target_folder) tuples
+        move: If True, move messages; otherwise copy
+        target_account: Target account for folders: 'local', 'imap', or account ID
+    """
+    from collections import defaultdict
+
+    from .protocol import Action
+    from .websocket_server import WebSocketServer
+
+    # Group by target folder
+    by_folder: dict[str, list[str]] = defaultdict(list)
+    for message_id, folder in classifications:
+        by_folder[folder].append(message_id)
+
+    logger.info(f"Preparing to {'move' if move else 'copy'} {len(classifications)} emails to {len(by_folder)} folders")
+    logger.info(f"Target account: {target_account}")
+
+    # Start WebSocket server
+    ws_config = config.websocket
+    if not ws_config.enabled:
+        logger.error("WebSocket is not enabled in config. Add [websocket] section with enabled=true")
+        return
+
+    # Create a temporary database connection for the server (it needs one for queries)
+    from .database import Database
+    temp_db = Database(config.database.path)
+    temp_db.connect()
+
+    try:
+        server = WebSocketServer(ws_config, temp_db, config.database.categories_file)
+
+        # Start server in background
+        server_task = asyncio.create_task(server.start())
+
+        logger.info(f"WebSocket server started on ws://{ws_config.host}:{ws_config.port}")
+        logger.info("Waiting for Thunderbird extension to connect...")
+
+        # Wait for extension to connect (timeout after 60 seconds)
+        for _ in range(60):
+            if server.is_connected:
+                break
+            await asyncio.sleep(1)
+        else:
+            logger.error("Timeout waiting for extension to connect")
+            await server.stop()
+            server_task.cancel()
+            return
+
+        logger.info("Extension connected!")
+
+        # Send copy/move commands for each folder
+        action = Action.MOVE_MESSAGES if move else Action.COPY_MESSAGES
+        total_success = 0
+        total_failed = 0
+
+        for folder, message_ids in by_folder.items():
+            logger.info(f"  {'Moving' if move else 'Copying'} {len(message_ids)} emails to {folder}...")
+
+            # Build target folder spec with account
+            target_folder_spec: dict[str, str] = {"path": folder}
+            if target_account:
+                target_folder_spec["accountId"] = target_account
+
+            response = await server.send_request(
+                action,
+                {
+                    "headerMessageIds": message_ids,
+                    "targetFolder": target_folder_spec,
+                },
+                timeout=60.0,
+            )
+
+            if response and response.ok:
+                result = response.result or {}
+                success_count = result.get("moved" if move else "copied", 0)
+                not_found = result.get("notFound", [])
+                total_success += success_count
+                total_failed += len(not_found)
+                if not_found:
+                    logger.warning(f"    {len(not_found)} messages not found in Thunderbird")
+            else:
+                error = response.error if response else "No response"
+                logger.error(f"    Failed: {error}")
+                total_failed += len(message_ids)
+
+        logger.info(f"Complete: {total_success} {'moved' if move else 'copied'}, {total_failed} failed")
+
+        # Stop server
+        await server.stop()
+        server_task.cancel()
+
+    finally:
+        temp_db.close()
+
+
+async def run_bulk_classify(
+    config: Config,
+    db: Database,
+    copy: bool = False,
+    move: bool = False,
+    target_account: str = "local",
+) -> None:
+    """Run bulk classification mode.
+
+    Args:
+        config: Application configuration
+        db: Database instance
+        copy: If True, copy classified emails to target folders via extension
+        move: If True, move classified emails to target folders via extension
+        target_account: Target account for folders: 'local', 'imap', or account ID
+    """
+    from .websocket_server import WebSocketServer
+
+    if copy and move:
+        logger.error("Cannot specify both --copy and --move")
+        return
+
     db.connect()
     db.init_schema()
+
+    ws_server = None
+    server_task = None
+
     try:
-        await bulk_classify_from_thunderbird(config, db)
+        # If copy or move requested, start WebSocket server and wait for extension
+        if copy or move:
+            ws_config = config.websocket
+            if not ws_config.enabled:
+                logger.error("WebSocket is not enabled in config. Add [websocket] section with enabled=true")
+                return
+
+            ws_server = WebSocketServer(ws_config, db, config.database.categories_file)
+            server_task = asyncio.create_task(ws_server.start())
+
+            logger.info(f"WebSocket server started on ws://{ws_config.host}:{ws_config.port}")
+            logger.info("Waiting for Thunderbird extension to connect...")
+
+            # Wait for extension to connect (timeout after 60 seconds)
+            for _ in range(60):
+                if ws_server.is_connected:
+                    break
+                await asyncio.sleep(1)
+            else:
+                logger.error("Timeout waiting for extension to connect")
+                await ws_server.stop()
+                server_task.cancel()
+                return
+
+            logger.info("Extension connected! Starting classification with immediate copy/move...")
+
+        # Classify emails (with immediate copy/move if ws_server is provided)
+        await bulk_classify_from_thunderbird(
+            config, db, ws_server=ws_server, move=move, target_account=target_account
+        )
+
     finally:
+        # Stop WebSocket server if it was started
+        if ws_server:
+            await ws_server.stop()
+        if server_task:
+            server_task.cancel()
         db.close()
 
 
@@ -663,6 +890,90 @@ def reset_database(db_path: Path) -> None:
         logger.info(f"Database does not exist: {db_path}")
 
 
+async def cleanup_thunderbird_folders(
+    config: Config,
+    db: Database,
+    target_account: str = "local",
+) -> None:
+    """Delete classification folders from Thunderbird via extension.
+
+    Args:
+        config: Application configuration
+        db: Database instance (to get list of classification folders)
+        target_account: Target account: 'local', 'imap', or account ID
+    """
+    from .protocol import Action
+    from .websocket_server import WebSocketServer
+
+    db.connect()
+    db.init_schema()
+
+    try:
+        # Get distinct classifications from database
+        rows = db.conn.execute(
+            "SELECT DISTINCT classification FROM emails WHERE classification IS NOT NULL"
+        ).fetchall()
+        folders = [row["classification"] for row in rows]
+
+        if not folders:
+            logger.info("No classification folders to delete")
+            return
+
+        logger.info(f"Will delete {len(folders)} folders from {target_account}")
+
+        # Start WebSocket server
+        ws_config = config.websocket
+        if not ws_config.enabled:
+            logger.error("WebSocket is not enabled in config")
+            return
+
+        server = WebSocketServer(ws_config, db, config.database.categories_file)
+        server_task = asyncio.create_task(server.start())
+
+        logger.info(f"WebSocket server started on ws://{ws_config.host}:{ws_config.port}")
+        logger.info("Waiting for Thunderbird extension to connect...")
+
+        # Wait for extension to connect
+        for _ in range(30):
+            if server.is_connected:
+                break
+            await asyncio.sleep(1)
+        else:
+            logger.error("Timeout waiting for extension to connect")
+            await server.stop()
+            server_task.cancel()
+            return
+
+        logger.info("Extension connected!")
+
+        # Delete each folder
+        deleted = 0
+        failed = 0
+
+        for folder_name in sorted(folders):
+            response = await server.send_request(
+                Action.DELETE_FOLDER,
+                {"accountId": target_account, "path": folder_name},
+                timeout=10,
+            )
+
+            if response and response.ok:
+                logger.info(f"  Deleted: {folder_name}")
+                deleted += 1
+            else:
+                error = response.error if response else "No response"
+                logger.warning(f"  Failed to delete {folder_name}: {error}")
+                failed += 1
+
+        logger.info(f"Cleanup complete: {deleted} deleted, {failed} failed")
+
+        await server.stop()
+        server_task.cancel()
+
+    finally:
+        db.close()
+
+
 def upload_to_imap(
     config: Config,
     db: Database,
@@ -841,6 +1152,22 @@ def main() -> None:
     add_common_args(classify_parser)
     add_thunderbird_args(classify_parser)
     add_limit_args(classify_parser)
+    classify_parser.add_argument(
+        "--copy",
+        action="store_true",
+        help="Copy classified emails to target folders via Thunderbird extension",
+    )
+    classify_parser.add_argument(
+        "--move",
+        action="store_true",
+        help="Move classified emails to target folders via Thunderbird extension",
+    )
+    classify_parser.add_argument(
+        "--target-account",
+        type=str,
+        default="local",
+        help="Target account for folders: 'local' (default), 'imap' (first IMAP), or account ID",
+    )
 
     # init - Initialize folder structure
     init_parser = subparsers.add_parser("init", help="Analyze emails and suggest folder structure")
@@ -894,6 +1221,18 @@ def main() -> None:
     reset_parser = subparsers.add_parser("reset", help="Delete database and start fresh")
     add_common_args(reset_parser)
 
+    # cleanup - Delete classification folders from Thunderbird
+    cleanup_parser = subparsers.add_parser(
+        "cleanup", help="Delete classification folders from Thunderbird Local Folders"
+    )
+    add_common_args(cleanup_parser)
+    cleanup_parser.add_argument(
+        "--target-account",
+        type=str,
+        default="local",
+        help="Target account: 'local' (default), 'imap', or account ID",
+    )
+
     args = parser.parse_args()
 
     # Default to daemon if no command specified
@@ -929,11 +1268,17 @@ def main() -> None:
     elif args.command == "learn":
         asyncio.run(run_learn_folders(config))
     elif args.command == "classify":
-        asyncio.run(run_bulk_classify(config, db))
+        copy_mode = getattr(args, "copy", False)
+        move_mode = getattr(args, "move", False)
+        target_account = getattr(args, "target_account", "local")
+        asyncio.run(run_bulk_classify(config, db, copy=copy_mode, move=move_mode, target_account=target_account))
     elif args.command == "upload":
         dry_run = getattr(args, "dry_run", False)
         folder_filter = getattr(args, "upload_folder", None)
         upload_to_imap(config, db, dry_run=dry_run, folder_filter=folder_filter)
+    elif args.command == "cleanup":
+        target_account = getattr(args, "target_account", "local")
+        asyncio.run(cleanup_thunderbird_folders(config, db, target_account=target_account))
     elif args.command == "daemon":
         asyncio.run(run_daemon(config, db))
 

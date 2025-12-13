@@ -126,14 +126,26 @@ class TestExtractEmailSummary:
         )
         assert result["from_addr"] == "john@example.com"
 
-    def test_cleans_body(self):
+    def test_cleans_body_html(self):
+        """Test that HTML tags are removed from body."""
         result = extract_email_summary(
             subject="Test",
             from_addr="sender@example.com",
-            body="Hello <b>world</b>\n> quoted text",
+            body="Hello <b>world</b> and <i>more</i>",
         )
         assert "<b>" not in result["body"]
+        assert "<i>" not in result["body"]
+        assert "world" in result["body"]
+
+    def test_cleans_body_quotes(self):
+        """Test that quoted lines are removed from plain text body."""
+        result = extract_email_summary(
+            subject="Test",
+            from_addr="sender@example.com",
+            body="Hello world\n> quoted text\nMore content",
+        )
         assert "> quoted" not in result["body"]
+        assert "Hello world" in result["body"]
 
     def test_handles_none_values(self):
         result = extract_email_summary(

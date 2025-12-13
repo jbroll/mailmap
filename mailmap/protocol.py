@@ -9,10 +9,15 @@ from typing import Any
 class Action(str, Enum):
     """Actions that mailmap can request from the extension."""
     MOVE_MESSAGES = "moveMessages"
+    COPY_MESSAGES = "copyMessages"
+    DELETE_MESSAGES = "deleteMessages"
     LIST_FOLDERS = "listFolders"
     LIST_ACCOUNTS = "listAccounts"
     GET_MESSAGE = "getMessage"
     TAG_MESSAGES = "tagMessages"
+    CREATE_FOLDER = "createFolder"
+    RENAME_FOLDER = "renameFolder"
+    DELETE_FOLDER = "deleteFolder"
     PING = "ping"
 
 

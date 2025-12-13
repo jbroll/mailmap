@@ -63,7 +63,7 @@ const actionHandlers = {
 
     for (const msg of page.messages.slice(0, limit)) {
       messages.push({
-        id: msg.id,
+        headerMessageId: msg.headerMessageId,
         subject: msg.subject,
         author: msg.author,
         date: msg.date,
@@ -122,7 +122,17 @@ const actionHandlers = {
   deleteFolder: async (params) => {
     const { accountId, path } = params;
 
-    const account = await browser.accounts.get(accountId);
+    // Resolve account by type alias or ID
+    const accounts = await browser.accounts.list();
+    let account;
+    if (accountId === "local") {
+      account = accounts.find(a => a.type === "none");
+    } else if (accountId === "imap") {
+      account = accounts.find(a => a.type === "imap");
+    } else {
+      account = await browser.accounts.get(accountId);
+    }
+
     if (!account) {
       throw new Error(`Account not found: ${accountId}`);
     }
@@ -137,17 +147,21 @@ const actionHandlers = {
   },
 
   getMessage: async (params) => {
-    const { messageId } = params;
-    const message = await browser.messages.get(messageId);
-    if (!message) {
-      throw new Error(`Message not found: ${messageId}`);
+    const { headerMessageId } = params;
+
+    // Resolve header Message-ID to Thunderbird internal ID
+    const result = await browser.messages.query({ headerMessageId });
+    if (result.messages.length === 0) {
+      throw new Error(`Message not found: ${headerMessageId}`);
     }
 
+    const message = result.messages[0];
+
     // Get full message content
-    const full = await browser.messages.getFull(messageId);
+    const full = await browser.messages.getFull(message.id);
 
     return {
-      id: message.id,
+      headerMessageId,
       subject: message.subject,
       author: message.author,
       date: message.date,
@@ -157,84 +171,138 @@ const actionHandlers = {
   },
 
   moveMessages: async (params) => {
-    const { messageIds, targetFolder } = params;
+    const { headerMessageIds, targetFolder } = params;
 
-    if (!messageIds || !messageIds.length) {
-      throw new Error("No message IDs provided");
+    if (!headerMessageIds || !headerMessageIds.length) {
+      throw new Error("No header message IDs provided");
     }
     if (!targetFolder) {
       throw new Error("No target folder provided");
     }
 
-    // Find the target folder
-    const folder = await findFolder(targetFolder);
-    if (!folder) {
-      throw new Error(`Target folder not found: ${JSON.stringify(targetFolder)}`);
+    // Find or create the target folder
+    const folder = await findOrCreateFolder(targetFolder);
+
+    // Resolve header Message-IDs to Thunderbird internal IDs
+    const { tbIds, notFound } = await resolveHeaderMessageIds(headerMessageIds);
+
+    if (tbIds.length === 0) {
+      return { moved: 0, notFound, targetFolder: folder.path };
     }
 
     // Move messages
-    await browser.messages.move(messageIds, folder);
+    await browser.messages.move(tbIds, folder);
 
     return {
-      moved: messageIds.length,
+      moved: tbIds.length,
+      notFound,
       targetFolder: folder.path,
     };
   },
 
   copyMessages: async (params) => {
-    const { messageIds, targetFolder } = params;
+    const { headerMessageIds, targetFolder } = params;
 
-    if (!messageIds || !messageIds.length) {
-      throw new Error("No message IDs provided");
+    if (!headerMessageIds || !headerMessageIds.length) {
+      throw new Error("No header message IDs provided");
     }
     if (!targetFolder) {
       throw new Error("No target folder provided");
     }
 
-    const folder = await findFolder(targetFolder);
-    if (!folder) {
-      throw new Error(`Target folder not found: ${JSON.stringify(targetFolder)}`);
+    // Find or create the target folder
+    const folder = await findOrCreateFolder(targetFolder);
+
+    // Resolve header Message-IDs to Thunderbird internal IDs
+    const { tbIds, notFound } = await resolveHeaderMessageIds(headerMessageIds);
+
+    if (tbIds.length === 0) {
+      return { copied: 0, notFound, targetFolder: folder.path };
     }
 
-    await browser.messages.copy(messageIds, folder);
+    await browser.messages.copy(tbIds, folder);
 
     return {
-      copied: messageIds.length,
+      copied: tbIds.length,
+      notFound,
       targetFolder: folder.path,
     };
   },
 
   tagMessages: async (params) => {
-    const { messageIds, tags } = params;
+    const { headerMessageIds, tags } = params;
 
-    if (!messageIds || !messageIds.length) {
-      throw new Error("No message IDs provided");
+    if (!headerMessageIds || !headerMessageIds.length) {
+      throw new Error("No header message IDs provided");
     }
 
-    for (const messageId of messageIds) {
-      await browser.messages.update(messageId, { tags });
+    // Resolve header Message-IDs to Thunderbird internal IDs
+    const { tbIds, notFound } = await resolveHeaderMessageIds(headerMessageIds);
+
+    for (const tbId of tbIds) {
+      await browser.messages.update(tbId, { tags });
     }
 
     return {
-      tagged: messageIds.length,
+      tagged: tbIds.length,
+      notFound,
       tags,
     };
   },
 
   deleteMessages: async (params) => {
-    const { messageIds, permanently } = params;
+    const { headerMessageIds, permanently } = params;
 
-    if (!messageIds || !messageIds.length) {
-      throw new Error("No message IDs provided");
+    if (!headerMessageIds || !headerMessageIds.length) {
+      throw new Error("No header message IDs provided");
     }
 
-    await browser.messages.delete(messageIds, permanently || false);
+    // Resolve header Message-IDs to Thunderbird internal IDs
+    const { tbIds, notFound } = await resolveHeaderMessageIds(headerMessageIds);
+
+    if (tbIds.length > 0) {
+      await browser.messages.delete(tbIds, permanently || false);
+    }
 
     return {
-      deleted: messageIds.length,
+      deleted: tbIds.length,
+      notFound,
     };
   },
 };
+
+// Helper: Resolve RFC 2822 Message-ID headers to Thunderbird internal IDs
+async function resolveHeaderMessageIds(headerMessageIds) {
+  const tbIds = [];
+  const notFound = [];
+
+  for (const headerMsgId of headerMessageIds) {
+    // Try with original format first
+    let result = await browser.messages.query({ headerMessageId: headerMsgId });
+
+    // If not found and has angle brackets, try without them
+    if (result.messages.length === 0 && headerMsgId.startsWith('<') && headerMsgId.endsWith('>')) {
+      const stripped = headerMsgId.slice(1, -1);
+      result = await browser.messages.query({ headerMessageId: stripped });
+      if (result.messages.length > 0) {
+        console.log(`[mailmap] Found with stripped brackets: ${stripped}`);
+      }
+    }
+
+    // If still not found, log for debugging
+    if (result.messages.length === 0) {
+      console.log(`[mailmap] Message not found: ${headerMsgId}`);
+    }
+
+    if (result.messages.length > 0) {
+      tbIds.push(result.messages[0].id);
+    } else {
+      notFound.push(headerMsgId);
+    }
+  }
+
+  return { tbIds, notFound };
+}
 
 // Helper: Flatten nested folder structure
 function flattenFolders(folders, accountId, parentPath = "") {
@@ -277,6 +345,62 @@ async function findFolder(spec) {
   }
 
   return null;
+}
+
+// Helper: Find folder or create it if it doesn't exist
+async function findOrCreateFolder(spec) {
+  const accountId = spec.accountId;
+  const path = spec.path || spec;
+  const accounts = await browser.accounts.list();
+
+  // Determine target account first
+  let targetAccount;
+  if (accountId === "local") {
+    targetAccount = accounts.find(a => a.type === "none");
+  } else if (accountId === "imap") {
+    targetAccount = accounts.find(a => a.type === "imap");
+  } else if (accountId) {
+    targetAccount = await browser.accounts.get(accountId);
+  } else {
+    // Default to Local Folders
+    targetAccount = accounts.find(a => a.type === "none") || accounts[0];
+  }
+
+  if (!targetAccount) {
+    throw new Error("No target account found");
+  }
+
+  // Search ONLY in target account
+  let folder = findFolderInTree(targetAccount.folders, path);
+  if (folder) {
+    return folder;
+  }
+
+  // Folder doesn't exist in target account - create it
+  console.log(`[mailmap] Creating folder '${path}' in: ${targetAccount.name} (${targetAccount.type})`)
+
+  // Create folder(s) - handle nested paths like "Parent/Child"
+  const parts = path.split("/");
+  let parentFolder = targetAccount;
+
+  for (let i = 0; i < parts.length; i++) {
+    const folderName = parts[i];
+    const existingFolder = findFolderInTree(
+      parentFolder.folders || parentFolder.subFolders || [],
+      folderName
+    );
+
+    if (existingFolder) {
+      parentFolder = existingFolder;
+    } else {
+      // Create this folder
+      console.log(`[mailmap] Creating folder: ${folderName} in ${parentFolder.name || targetAccount.name}`);
+      const newFolder = await browser.folders.create(parentFolder, folderName);
+      parentFolder = newFolder;
+    }
+  }
+
+  return parentFolder;
 }
 
 // Helper: Find folder in tree by path
