@@ -7,10 +7,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from .categories import Category, load_categories, save_categories, get_category_descriptions
 from .config import Config, load_config
-from .database import Database, Email, Folder
+from .database import Database, Email
 from .imap_client import EmailMessage, ImapListener, ImapMailbox
 from .llm import OllamaClient, SuggestedFolder
+from .spam import parse_rules, is_spam
 from .thunderbird import ThunderbirdReader
 
 logging.basicConfig(
@@ -82,9 +84,10 @@ class EmailProcessor:
         )
         self.db.insert_email(email_record)
 
-        folder_descriptions = self.db.get_folder_descriptions()
+        categories = load_categories(self.config.database.categories_file)
+        folder_descriptions = get_category_descriptions(categories)
         if not folder_descriptions:
-            logger.warning("No folder descriptions available, skipping classification")
+            logger.warning("No categories available, skipping classification")
             return
 
         async with OllamaClient(self.config.ollama) as llm:
@@ -101,79 +104,6 @@ class EmailProcessor:
         logger.info(
             f"Classified as '{classification.predicted_folder}' (confidence: {classification.confidence:.2f})"
         )
-
-
-async def sync_folders(config: Config, db: Database) -> None:
-    """Sync folder list from IMAP server to database."""
-    logger.info("Syncing folders from IMAP server...")
-    mailbox = ImapMailbox(config.imap)
-
-    loop = asyncio.get_event_loop()
-
-    def fetch_folders():
-        mailbox.connect()
-        try:
-            return mailbox.list_folders()
-        finally:
-            mailbox.disconnect()
-
-    folders = await loop.run_in_executor(None, fetch_folders)
-
-    for folder_name in folders:
-        existing = db.get_folder(folder_name)
-        if not existing:
-            folder = Folder(folder_id=folder_name, name=folder_name)
-            db.upsert_folder(folder)
-            logger.info(f"Added folder: {folder_name}")
-
-    logger.info(f"Synced {len(folders)} folders")
-
-
-async def generate_folder_descriptions(config: Config, db: Database) -> None:
-    """Generate descriptions for folders that don't have them."""
-    logger.info("Generating folder descriptions...")
-    folders = db.get_all_folders()
-
-    mailbox = ImapMailbox(config.imap)
-    loop = asyncio.get_event_loop()
-
-    for folder in folders:
-        if folder.description:
-            continue
-
-        def fetch_samples(folder_name=folder.folder_id):
-            mailbox.connect()
-            try:
-                uids = mailbox.fetch_recent_uids(folder_name, limit=5)
-                samples = []
-                for uid in uids:
-                    msg = mailbox.fetch_email(uid, folder_name)
-                    if msg:
-                        samples.append({
-                            "subject": msg.subject,
-                            "from_addr": msg.from_addr,
-                            "body": msg.body_text[:500],
-                        })
-                return samples
-            except Exception as e:
-                logger.warning(f"Could not fetch samples from {folder_name}: {e}")
-                return []
-            finally:
-                mailbox.disconnect()
-
-        samples = await loop.run_in_executor(None, fetch_samples)
-
-        if samples:
-            async with OllamaClient(config.ollama) as llm:
-                result = await llm.generate_folder_description(folder.folder_id, samples)
-                folder.description = result.description
-                folder.last_updated = datetime.now()
-                db.upsert_folder(folder)
-                logger.info(f"Generated description for {folder.folder_id}")
-        else:
-            folder.description = f"Folder named {folder.name}"
-            folder.last_updated = datetime.now()
-            db.upsert_folder(folder)
 
 
 async def run_listener(config: Config, db: Database) -> None:
@@ -216,155 +146,10 @@ async def run_daemon(config: Config, db: Database) -> None:
         # WebSocket server (if enabled)
         if config.websocket.enabled:
             logger.info("Starting WebSocket server...")
-            tasks.append(run_websocket_server(config.websocket, db))
+            tasks.append(run_websocket_server(config.websocket, db, config.database.categories_file))
 
         # Run all services concurrently
         await asyncio.gather(*tasks)
-    finally:
-        db.close()
-
-
-async def import_from_thunderbird(config: Config, db: Database) -> None:
-    """Import emails from Thunderbird profile, generate descriptions, and classify."""
-    tb_config = config.thunderbird
-    profile_path = Path(tb_config.profile_path) if tb_config.profile_path else None
-
-    logger.info("Initializing Thunderbird reader...")
-    try:
-        reader = ThunderbirdReader(profile_path, tb_config.server_filter)
-    except ValueError as e:
-        logger.error(f"Failed to initialize Thunderbird reader: {e}")
-        return
-
-    logger.info(f"Found Thunderbird profile: {reader.profile_path}")
-
-    # List available servers
-    servers = reader.list_servers()
-    logger.info(f"Available IMAP servers: {servers}")
-
-    # Phase 1: Sync folders from Thunderbird
-    logger.info("Phase 1: Syncing folders from Thunderbird...")
-    all_folders = reader.list_folders()
-
-    # Apply folder filter if specified
-    if tb_config.folder_filter:
-        folders = [f for f in all_folders if f == tb_config.folder_filter]
-        if not folders:
-            logger.error(f"Folder '{tb_config.folder_filter}' not found. Available: {all_folders}")
-            return
-        logger.info(f"Filtering to folder: {tb_config.folder_filter}")
-    else:
-        folders = all_folders
-
-    for folder_name in folders:
-        existing = db.get_folder(folder_name)
-        if not existing:
-            folder = Folder(folder_id=folder_name, name=folder_name)
-            db.upsert_folder(folder)
-            logger.info(f"Added folder: {folder_name}")
-    logger.info(f"Synced {len(folders)} folders")
-
-    # Phase 2: Generate folder descriptions from sample emails
-    logger.info("Phase 2: Generating folder descriptions...")
-    all_folders = db.get_all_folders()
-
-    for folder in all_folders:
-        if folder.description:
-            continue
-
-        samples = reader.get_sample_emails(
-            folder.folder_id,
-            count=tb_config.samples_per_folder,
-        )
-
-        if samples:
-            sample_dicts = [
-                {
-                    "subject": s.subject,
-                    "from_addr": s.from_addr,
-                    "body": s.body_text[:500],
-                }
-                for s in samples
-            ]
-            async with OllamaClient(config.ollama) as llm:
-                result = await llm.generate_folder_description(folder.folder_id, sample_dicts)
-                folder.description = result.description
-                folder.last_updated = datetime.now()
-                db.upsert_folder(folder)
-                logger.info(f"Generated description for {folder.folder_id}: {result.description[:60]}...")
-        else:
-            folder.description = f"Folder named {folder.name}"
-            folder.last_updated = datetime.now()
-            db.upsert_folder(folder)
-            logger.info(f"No samples for {folder.folder_id}, using default description")
-
-    # Phase 3: Import and classify emails
-    logger.info("Phase 3: Importing and classifying emails...")
-    folder_descriptions = db.get_folder_descriptions()
-
-    if not folder_descriptions:
-        logger.error("No folder descriptions available, cannot classify")
-        return
-
-    total_imported = 0
-    total_classified = 0
-
-    for folder_name in folders:
-        logger.info(f"Processing folder: {folder_name}")
-        folder_count = 0
-
-        # Choose between random sampling and sequential reading
-        if tb_config.random_sample and tb_config.import_limit:
-            email_iterator = reader.read_folder_random(folder_name, tb_config.import_limit)
-        else:
-            email_iterator = reader.read_folder(folder_name, limit=tb_config.import_limit)
-
-        for tb_email in email_iterator:
-            # Check if already imported
-            existing_email = db.get_email(tb_email.message_id)
-            if existing_email:
-                continue
-
-            # Import email
-            email_record = Email(
-                message_id=tb_email.message_id,
-                folder_id=tb_email.folder,
-                subject=tb_email.subject,
-                from_addr=tb_email.from_addr,
-                mbox_path=tb_email.mbox_path,
-                processed_at=datetime.now(),
-            )
-            db.insert_email(email_record)
-            total_imported += 1
-            folder_count += 1
-
-            # Classify email
-            try:
-                async with OllamaClient(config.ollama) as llm:
-                    classification = await llm.classify_email(
-                        tb_email.subject,
-                        tb_email.from_addr,
-                        tb_email.body_text,
-                        folder_descriptions,
-                    )
-                db.update_classification(
-                    tb_email.message_id, classification.predicted_folder, classification.confidence
-                )
-                total_classified += 1
-            except Exception as e:
-                logger.warning(f"Failed to classify {tb_email.message_id}: {e}")
-
-        logger.info(f"  Imported {folder_count} emails from {folder_name}")
-
-    logger.info(f"Import complete: {total_imported} imported, {total_classified} classified")
-
-
-async def run_thunderbird_import(config: Config, db: Database) -> None:
-    """Run Thunderbird import mode."""
-    db.connect()
-    db.init_schema()
-    try:
-        await import_from_thunderbird(config, db)
     finally:
         db.close()
 
@@ -379,15 +164,12 @@ def is_system_folder(folder_name: str) -> bool:
     return any(part in SYSTEM_FOLDERS for part in parts)
 
 
-async def learn_from_existing_folders(config: Config, db: Database) -> None:
+async def learn_from_existing_folders(config: Config) -> None:
     """Learn classification categories from user's existing folder structure.
 
     This scans all non-system folders, samples emails from each, generates
-    descriptions, and creates classification categories that preserve the
-    user's manual organization.
+    descriptions, and saves categories to categories.txt.
     """
-    from .thunderbird import read_mbox_random
-
     tb_config = config.thunderbird
     profile_path = Path(tb_config.profile_path) if tb_config.profile_path else None
 
@@ -413,80 +195,186 @@ async def learn_from_existing_folders(config: Config, db: Database) -> None:
         logger.warning("No user folders found to learn from")
         return
 
-    # Determine sample limit (default to 10% if not specified)
-    sample_limit = tb_config.import_limit if tb_config.import_limit else 0.1
-
-    total_emails = 0
-    total_folders = 0
+    # Load existing categories to merge with
+    categories_path = Path(config.database.categories_file)
+    existing_categories = load_categories(categories_path)
+    existing_names = {cat.name for cat in existing_categories}
+    new_categories = []
 
     for folder_name in user_folders:
+        # Skip if category already exists
+        if folder_name in existing_names:
+            logger.info(f"Category '{folder_name}' already exists, skipping")
+            continue
+
         logger.info(f"Processing folder: {folder_name}")
 
-        # Sample emails from this folder
-        if tb_config.random_sample or (isinstance(sample_limit, float) and sample_limit < 1):
-            emails = list(reader.read_folder_random(folder_name, sample_limit))
-        else:
-            limit = int(sample_limit) if sample_limit else None
-            emails = list(reader.read_folder(folder_name, limit=limit))
+        # Sample emails from this folder for description generation
+        samples = reader.get_sample_emails(
+            folder_name,
+            count=tb_config.samples_per_folder,
+        )
 
-        if not emails:
+        if not samples:
             logger.info(f"  No emails in {folder_name}, skipping")
             continue
 
         # Generate folder description from samples
         sample_dicts = [
             {
-                "subject": e.subject,
-                "from_addr": e.from_addr,
-                "body": e.body_text[:500],
+                "subject": s.subject,
+                "from_addr": s.from_addr,
+                "body": s.body_text[:500],
             }
-            for e in emails[:20]  # Use up to 20 for description generation
+            for s in samples
         ]
 
         async with OllamaClient(config.ollama) as llm:
             result = await llm.generate_folder_description(folder_name, sample_dicts)
 
-        # Create folder in database with description
-        folder = Folder(
-            folder_id=folder_name,
-            name=folder_name,
-            description=result.description,
-            last_updated=datetime.now(),
-        )
-        db.upsert_folder(folder)
+        new_categories.append(Category(name=folder_name, description=result.description))
         logger.info(f"  Created category '{folder_name}': {result.description[:60]}...")
 
-        # Import sampled emails with their original folder as the classification
-        for tb_email in emails:
+    # Merge and save categories
+    all_categories = existing_categories + new_categories
+    save_categories(all_categories, categories_path)
+
+    logger.info(f"Learning complete: {len(new_categories)} new categories added")
+    logger.info(f"Total categories: {len(all_categories)} (saved to {categories_path})")
+
+
+async def run_learn_folders(config: Config) -> None:
+    """Run learn-folders mode."""
+    await learn_from_existing_folders(config)
+
+
+async def bulk_classify_from_thunderbird(config: Config, db: Database) -> None:
+    """Bulk classify emails from Thunderbird using existing categories.
+
+    Reads emails from Thunderbird profile and classifies them using
+    the categories defined in categories.txt.
+    """
+    tb_config = config.thunderbird
+    profile_path = Path(tb_config.profile_path) if tb_config.profile_path else None
+
+    # Load categories
+    categories_path = Path(config.database.categories_file)
+    categories = load_categories(categories_path)
+    folder_descriptions = get_category_descriptions(categories)
+
+    if not folder_descriptions:
+        logger.error(f"No categories found in {categories_path}")
+        logger.error("Run 'mailmap learn' first to generate categories")
+        return
+
+    logger.info(f"Loaded {len(folder_descriptions)} categories from {categories_path}")
+
+    # Initialize Thunderbird reader
+    logger.info("Initializing Thunderbird reader...")
+    try:
+        reader = ThunderbirdReader(profile_path, tb_config.server_filter)
+    except ValueError as e:
+        logger.error(f"Failed to initialize Thunderbird reader: {e}")
+        return
+
+    logger.info(f"Found Thunderbird profile: {reader.profile_path}")
+
+    # Get folders to process
+    all_folders = reader.list_folders()
+    if tb_config.folder_filter:
+        folders = [f for f in all_folders if f == tb_config.folder_filter]
+        if not folders:
+            logger.error(f"Folder '{tb_config.folder_filter}' not found")
+            return
+    else:
+        folders = all_folders
+
+    # Load spam rules
+    spam_rules = parse_rules(config.spam.rules) if config.spam.enabled else []
+
+    total_imported = 0
+    total_classified = 0
+    total_spam = 0
+
+    for folder_name in folders:
+        # Skip spam folders
+        if config.spam.enabled and folder_name in config.spam.skip_folders:
+            logger.info(f"Skipping spam folder: {folder_name}")
+            continue
+
+        logger.info(f"Processing folder: {folder_name}")
+        folder_count = 0
+
+        # Choose between random sampling and sequential reading
+        if tb_config.random_sample and tb_config.import_limit:
+            email_iterator = reader.read_folder_random(folder_name, tb_config.import_limit)
+        else:
+            email_iterator = reader.read_folder(folder_name, limit=tb_config.import_limit)
+
+        for tb_email in email_iterator:
+            # Check if already processed
             existing = db.get_email(tb_email.message_id)
             if existing:
                 continue
 
+            # Check for spam
+            if spam_rules and is_spam(tb_email.headers, spam_rules):
+                email_record = Email(
+                    message_id=tb_email.message_id,
+                    folder_id=folder_name,
+                    subject=tb_email.subject,
+                    from_addr=tb_email.from_addr,
+                    mbox_path=tb_email.mbox_path,
+                    is_spam=True,
+                    spam_reason="header_rule",
+                    processed_at=datetime.now(),
+                )
+                db.insert_email(email_record)
+                total_spam += 1
+                continue
+
+            # Import email
             email_record = Email(
                 message_id=tb_email.message_id,
-                folder_id=tb_email.folder,
+                folder_id=folder_name,
                 subject=tb_email.subject,
                 from_addr=tb_email.from_addr,
                 mbox_path=tb_email.mbox_path,
-                classification=folder_name,  # Pre-classified to original folder
-                confidence=1.0,  # User's manual classification = 100% confidence
                 processed_at=datetime.now(),
             )
             db.insert_email(email_record)
-            total_emails += 1
+            total_imported += 1
+            folder_count += 1
 
-        total_folders += 1
-        logger.info(f"  Imported {len(emails)} emails from {folder_name}")
+            # Classify email
+            try:
+                async with OllamaClient(config.ollama) as llm:
+                    classification = await llm.classify_email(
+                        tb_email.subject,
+                        tb_email.from_addr,
+                        tb_email.body_text,
+                        folder_descriptions,
+                    )
+                db.update_classification(
+                    tb_email.message_id,
+                    classification.predicted_folder,
+                    classification.confidence,
+                )
+                total_classified += 1
+            except Exception as e:
+                logger.warning(f"Failed to classify {tb_email.message_id}: {e}")
 
-    logger.info(f"Learning complete: {total_folders} categories, {total_emails} training emails")
+        logger.info(f"  Processed {folder_count} emails from {folder_name}")
+
+    logger.info(f"Classification complete: {total_imported} imported, {total_classified} classified, {total_spam} spam")
 
 
-async def run_learn_folders(config: Config, db: Database) -> None:
-    """Run learn-folders mode."""
+async def run_bulk_classify(config: Config, db: Database) -> None:
+    """Run bulk classification mode."""
     db.connect()
     db.init_schema()
     try:
-        await learn_from_existing_folders(config, db)
+        await bulk_classify_from_thunderbird(config, db)
     finally:
         db.close()
 
@@ -528,26 +416,37 @@ def list_classifications(db: Database, limit: int = 50) -> None:
         db.close()
 
 
-def list_folders_cmd(db: Database) -> None:
-    """List folders and their descriptions."""
+def list_categories_cmd(config: Config) -> None:
+    """List categories from categories file."""
+    categories_path = Path(config.database.categories_file)
+    categories = load_categories(categories_path)
+
+    if not categories:
+        print(f"No categories found in {categories_path}")
+        print("Create a categories.txt file or run 'mailmap init' to generate categories.")
+        return
+
+    print(f"{'Category':<25} {'Description':<75}")
+    print("-" * 102)
+
+    for cat in categories:
+        name = cat.name[:23]
+        desc = cat.description[:73]
+        print(f"{name:<25} {desc:<75}")
+
+    print(f"\nTotal: {len(categories)} categories (from {categories_path})")
+
+
+def clear_cmd(db: Database, folder: str | None = None) -> None:
+    """Clear classifications from emails."""
     db.connect()
     db.init_schema()
     try:
-        folders = db.get_all_folders()
-
-        if not folders:
-            print("No folders found.")
-            return
-
-        print(f"{'Folder':<30} {'Description':<70}")
-        print("-" * 102)
-
-        for folder in folders:
-            name = (folder.folder_id or "")[:28]
-            desc = (folder.description or "No description")[:68]
-            print(f"{name:<30} {desc:<70}")
-
-        print(f"\nTotal: {len(folders)} folders")
+        count = db.clear_classifications(folder)
+        if folder:
+            print(f"Cleared classifications from {count} emails in folder '{folder}'")
+        else:
+            print(f"Cleared classifications from {count} emails")
     finally:
         db.close()
 
@@ -557,25 +456,23 @@ def summary_cmd(db: Database) -> None:
     db.connect()
     db.init_schema()
     try:
-        # Get total counts
-        total = db.conn.execute("SELECT COUNT(*) FROM emails").fetchone()[0]
-        classified = db.conn.execute(
-            "SELECT COUNT(*) FROM emails WHERE classification IS NOT NULL"
-        ).fetchone()[0]
-        unclassified = total - classified
+        total = db.get_total_count()
+        classified = db.get_classified_count()
+        spam = db.get_spam_count()
+        unclassified = total - classified - spam
 
-        # Get counts per classification
+        # Get counts per classification (excluding spam)
         rows = db.conn.execute(
             """
             SELECT classification, COUNT(*) as count
             FROM emails
-            WHERE classification IS NOT NULL
+            WHERE classification IS NOT NULL AND is_spam = 0
             GROUP BY classification
             ORDER BY count DESC
             """
         ).fetchall()
 
-        if not rows:
+        if not rows and spam == 0:
             print("No classified emails found.")
             return
 
@@ -590,6 +487,8 @@ def summary_cmd(db: Database) -> None:
 
         print("-" * 53)
         print(f"{'Classified':<35} {classified:>8} {100*classified/total if total else 0:>7.1f}%")
+        if spam > 0:
+            print(f"{'Spam (skipped)':<35} {spam:>8} {100*spam/total if total else 0:>7.1f}%")
         if unclassified > 0:
             print(f"{'Unclassified':<35} {unclassified:>8} {100*unclassified/total if total else 0:>7.1f}%")
         print(f"{'Total':<35} {total:>8}")
@@ -597,7 +496,7 @@ def summary_cmd(db: Database) -> None:
         db.close()
 
 
-async def init_folders_from_samples(config: Config, db: Database) -> None:
+async def init_folders_from_samples(config: Config) -> None:
     """Analyze sample emails iteratively in batches to build folder structure."""
     tb_config = config.thunderbird
     profile_path = Path(tb_config.profile_path) if tb_config.profile_path else None
@@ -707,28 +606,19 @@ async def init_folders_from_samples(config: Config, db: Database) -> None:
             print(f"  {cat}: {count}")
         print()
 
-    # Create folders in database
-    db.connect()
-    db.init_schema()
-    try:
-        for folder in categories:
-            db_folder = Folder(
-                folder_id=folder.name,
-                name=folder.name,
-                description=folder.description,
-                last_updated=datetime.now(),
-            )
-            db.upsert_folder(db_folder)
-            logger.info(f"Created folder: {folder.name}")
-
-        print(f"Created {len(categories)} folders in database.")
-    finally:
-        db.close()
+    # Save categories to file
+    categories_path = Path(config.database.categories_file)
+    new_categories = [
+        Category(name=folder.name, description=folder.description)
+        for folder in categories
+    ]
+    save_categories(new_categories, categories_path)
+    print(f"Saved {len(categories)} categories to {categories_path}")
 
 
-async def run_init_folders(config: Config, db: Database) -> None:
+async def run_init_folders(config: Config) -> None:
     """Run folder initialization mode."""
-    await init_folders_from_samples(config, db)
+    await init_folders_from_samples(config)
 
 
 def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
@@ -942,33 +832,22 @@ def main() -> None:
     daemon_parser = subparsers.add_parser("daemon", help="Run IMAP listener daemon")
     add_common_args(daemon_parser)
 
-    # import - Import from Thunderbird
-    import_parser = subparsers.add_parser("import", help="Import emails from Thunderbird and classify")
-    add_common_args(import_parser)
-    add_thunderbird_args(import_parser)
-    add_limit_args(import_parser)
-    import_parser.add_argument(
-        "--samples",
-        type=int,
-        dest="samples_per_folder",
-        help="Number of emails to sample for folder descriptions",
-    )
+    # learn - Learn categories from existing folders (saves to categories.txt)
+    learn_parser = subparsers.add_parser("learn", help="Learn categories from existing Thunderbird folders")
+    add_common_args(learn_parser)
+    add_thunderbird_args(learn_parser)
 
-    # sync - Sync folders from IMAP
-    sync_parser = subparsers.add_parser("sync", help="Sync folders from IMAP and generate descriptions")
-    add_common_args(sync_parser)
+    # classify - Bulk classify emails from Thunderbird
+    classify_parser = subparsers.add_parser("classify", help="Bulk classify emails from Thunderbird")
+    add_common_args(classify_parser)
+    add_thunderbird_args(classify_parser)
+    add_limit_args(classify_parser)
 
     # init - Initialize folder structure
     init_parser = subparsers.add_parser("init", help="Analyze emails and suggest folder structure")
     add_common_args(init_parser)
     add_thunderbird_args(init_parser)
     add_limit_args(init_parser)
-
-    # learn - Learn from existing folders
-    learn_parser = subparsers.add_parser("learn", help="Learn categories from existing folder structure")
-    add_common_args(learn_parser)
-    add_thunderbird_args(learn_parser)
-    add_limit_args(learn_parser)
 
     # upload - Upload to IMAP
     upload_parser = subparsers.add_parser("upload", help="Upload classified emails to IMAP folders")
@@ -995,13 +874,22 @@ def main() -> None:
         help="Maximum results to show (default: 50)",
     )
 
-    # folders - List folders
-    folders_parser = subparsers.add_parser("folders", help="List folders and descriptions")
-    add_common_args(folders_parser)
+    # categories - List categories
+    categories_parser = subparsers.add_parser("categories", help="List classification categories")
+    add_common_args(categories_parser)
 
     # summary - Classification summary
     summary_parser = subparsers.add_parser("summary", help="Show classification summary with counts")
     add_common_args(summary_parser)
+
+    # clear - Clear classifications
+    clear_parser = subparsers.add_parser("clear", help="Clear email classifications")
+    add_common_args(clear_parser)
+    clear_parser.add_argument(
+        "--folder",
+        type=str,
+        help="Only clear emails from this source folder",
+    )
 
     # reset - Reset database
     reset_parser = subparsers.add_parser("reset", help="Delete database and start fresh")
@@ -1030,26 +918,19 @@ def main() -> None:
     if args.command == "list":
         limit = getattr(args, "limit", 50)
         list_classifications(db, limit=limit)
-    elif args.command == "folders":
-        list_folders_cmd(db)
+    elif args.command == "categories":
+        list_categories_cmd(config)
     elif args.command == "summary":
         summary_cmd(db)
+    elif args.command == "clear":
+        folder = getattr(args, "folder", None)
+        clear_cmd(db, folder)
     elif args.command == "init":
-        asyncio.run(run_init_folders(config, db))
+        asyncio.run(run_init_folders(config))
     elif args.command == "learn":
-        asyncio.run(run_learn_folders(config, db))
-    elif args.command == "import":
-        asyncio.run(run_thunderbird_import(config, db))
-    elif args.command == "sync":
-        async def sync_only():
-            db.connect()
-            db.init_schema()
-            try:
-                await sync_folders(config, db)
-                await generate_folder_descriptions(config, db)
-            finally:
-                db.close()
-        asyncio.run(sync_only())
+        asyncio.run(run_learn_folders(config))
+    elif args.command == "classify":
+        asyncio.run(run_bulk_classify(config, db))
     elif args.command == "upload":
         dry_run = getattr(args, "dry_run", False)
         folder_filter = getattr(args, "upload_folder", None)

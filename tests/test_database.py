@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from mailmap.database import Database, Folder, Email
+from mailmap.database import Database, Email
 
 
 class TestDatabase:
@@ -21,63 +21,14 @@ class TestDatabase:
         with pytest.raises(RuntimeError, match="Database not connected"):
             _ = db.conn
 
-
-class TestFolderOperations:
-    def test_upsert_and_get_folder(self, test_db):
-        folder = Folder(
-            folder_id="INBOX",
-            name="Inbox",
-            description="Main inbox folder",
-            last_updated=datetime.now(),
-        )
-        test_db.upsert_folder(folder)
-
-        retrieved = test_db.get_folder("INBOX")
-        assert retrieved is not None
-        assert retrieved.folder_id == "INBOX"
-        assert retrieved.name == "Inbox"
-        assert retrieved.description == "Main inbox folder"
-
-    def test_upsert_updates_existing(self, test_db):
-        folder = Folder(folder_id="INBOX", name="Inbox", description="Original")
-        test_db.upsert_folder(folder)
-
-        folder.description = "Updated description"
-        test_db.upsert_folder(folder)
-
-        retrieved = test_db.get_folder("INBOX")
-        assert retrieved.description == "Updated description"
-
-    def test_get_nonexistent_folder(self, test_db):
-        result = test_db.get_folder("NONEXISTENT")
-        assert result is None
-
-    def test_get_all_folders(self, test_db):
-        test_db.upsert_folder(Folder(folder_id="INBOX", name="Inbox"))
-        test_db.upsert_folder(Folder(folder_id="Sent", name="Sent"))
-        test_db.upsert_folder(Folder(folder_id="Trash", name="Trash"))
-
-        folders = test_db.get_all_folders()
-        assert len(folders) == 3
-        folder_ids = {f.folder_id for f in folders}
-        assert folder_ids == {"INBOX", "Sent", "Trash"}
-
-    def test_get_folder_descriptions(self, test_db):
-        test_db.upsert_folder(Folder(folder_id="INBOX", name="Inbox", description="Main inbox"))
-        test_db.upsert_folder(Folder(folder_id="Sent", name="Sent", description="Sent mail"))
-        test_db.upsert_folder(Folder(folder_id="Drafts", name="Drafts"))  # No description
-
-        descriptions = test_db.get_folder_descriptions()
-        assert descriptions == {
-            "INBOX": "Main inbox",
-            "Sent": "Sent mail",
-        }
+    def test_context_manager(self, temp_dir):
+        with Database(temp_dir / "test.db") as db:
+            assert db._conn is not None
+        assert db._conn is None
 
 
 class TestEmailOperations:
     def test_insert_and_get_email(self, test_db):
-        test_db.upsert_folder(Folder(folder_id="INBOX", name="Inbox"))
-
         email = Email(
             message_id="<test123@example.com>",
             folder_id="INBOX",
@@ -100,8 +51,6 @@ class TestEmailOperations:
         assert result is None
 
     def test_update_classification(self, test_db):
-        test_db.upsert_folder(Folder(folder_id="INBOX", name="Inbox"))
-
         email = Email(
             message_id="<test@example.com>",
             folder_id="INBOX",
@@ -119,8 +68,6 @@ class TestEmailOperations:
         assert retrieved.processed_at is not None
 
     def test_get_unclassified_emails(self, test_db):
-        test_db.upsert_folder(Folder(folder_id="INBOX", name="Inbox"))
-
         # Insert classified email
         email1 = Email(
             message_id="<classified@example.com>",
@@ -146,3 +93,215 @@ class TestEmailOperations:
         unclassified = test_db.get_unclassified_emails()
         assert len(unclassified) == 1
         assert unclassified[0].message_id == "<unclassified@example.com>"
+
+    def test_get_unclassified_excludes_spam(self, test_db):
+        # Insert spam email (unclassified but marked as spam)
+        spam_email = Email(
+            message_id="<spam@example.com>",
+            folder_id="INBOX",
+            subject="Buy now!",
+            from_addr="spammer@test.com",
+            mbox_path="/path/to/mbox",
+            is_spam=True,
+            spam_reason="X-Spam-Flag == YES",
+        )
+        test_db.insert_email(spam_email)
+
+        # Insert regular unclassified email
+        regular_email = Email(
+            message_id="<regular@example.com>",
+            folder_id="INBOX",
+            subject="Regular",
+            from_addr="friend@test.com",
+            mbox_path="/path/to/mbox",
+        )
+        test_db.insert_email(regular_email)
+
+        unclassified = test_db.get_unclassified_emails()
+        assert len(unclassified) == 1
+        assert unclassified[0].message_id == "<regular@example.com>"
+
+        # With include_spam=True
+        all_unclassified = test_db.get_unclassified_emails(include_spam=True)
+        assert len(all_unclassified) == 2
+
+    def test_mark_as_spam(self, test_db):
+        email = Email(
+            message_id="<test@example.com>",
+            folder_id="INBOX",
+            subject="Spam",
+            from_addr="spammer@test.com",
+            mbox_path="/path/to/mbox",
+        )
+        test_db.insert_email(email)
+
+        test_db.mark_as_spam("<test@example.com>", "X-Spam-Flag == YES")
+
+        retrieved = test_db.get_email("<test@example.com>")
+        assert retrieved.is_spam is True
+        assert retrieved.spam_reason == "X-Spam-Flag == YES"
+        assert retrieved.classification == "Spam"
+
+    def test_clear_classifications(self, test_db):
+        # Insert some classified emails
+        for i in range(5):
+            email = Email(
+                message_id=f"<test{i}@example.com>",
+                folder_id="INBOX",
+                subject=f"Test {i}",
+                from_addr="test@test.com",
+                mbox_path="/path/to/mbox",
+                classification="Work",
+                confidence=0.9,
+            )
+            test_db.insert_email(email)
+
+        # Clear all
+        count = test_db.clear_classifications()
+        assert count == 5
+
+        # Verify cleared
+        for i in range(5):
+            retrieved = test_db.get_email(f"<test{i}@example.com>")
+            assert retrieved.classification is None
+            assert retrieved.confidence is None
+
+    def test_clear_classifications_by_folder(self, test_db):
+        # Insert emails in different folders
+        email1 = Email(
+            message_id="<inbox@example.com>",
+            folder_id="INBOX",
+            subject="Inbox",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Work",
+        )
+        email2 = Email(
+            message_id="<sent@example.com>",
+            folder_id="Sent",
+            subject="Sent",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Work",
+        )
+        test_db.insert_email(email1)
+        test_db.insert_email(email2)
+
+        # Clear only INBOX
+        count = test_db.clear_classifications("INBOX")
+        assert count == 1
+
+        # INBOX should be cleared
+        retrieved1 = test_db.get_email("<inbox@example.com>")
+        assert retrieved1.classification is None
+
+        # Sent should still be classified
+        retrieved2 = test_db.get_email("<sent@example.com>")
+        assert retrieved2.classification == "Work"
+
+    def test_clear_classifications_preserves_spam(self, test_db):
+        # Insert spam email
+        spam = Email(
+            message_id="<spam@example.com>",
+            folder_id="INBOX",
+            subject="Spam",
+            from_addr="spammer@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Spam",
+            is_spam=True,
+        )
+        test_db.insert_email(spam)
+
+        # Clear classifications
+        test_db.clear_classifications()
+
+        # Spam should still be classified
+        retrieved = test_db.get_email("<spam@example.com>")
+        assert retrieved.classification == "Spam"
+        assert retrieved.is_spam is True
+
+    def test_get_classification_counts(self, test_db):
+        # Insert emails with different classifications
+        for i in range(3):
+            email = Email(
+                message_id=f"<work{i}@example.com>",
+                folder_id="INBOX",
+                subject=f"Work {i}",
+                from_addr="test@test.com",
+                mbox_path="/path/to/mbox",
+                classification="Work",
+            )
+            test_db.insert_email(email)
+
+        for i in range(2):
+            email = Email(
+                message_id=f"<personal{i}@example.com>",
+                folder_id="INBOX",
+                subject=f"Personal {i}",
+                from_addr="test@test.com",
+                mbox_path="/path/to/mbox",
+                classification="Personal",
+            )
+            test_db.insert_email(email)
+
+        counts = test_db.get_classification_counts()
+        assert counts == {"Work": 3, "Personal": 2}
+
+    def test_get_emails_by_classification(self, test_db):
+        # Insert emails
+        email1 = Email(
+            message_id="<work1@example.com>",
+            folder_id="INBOX",
+            subject="Work 1",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Work",
+        )
+        email2 = Email(
+            message_id="<personal1@example.com>",
+            folder_id="INBOX",
+            subject="Personal 1",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Personal",
+        )
+        test_db.insert_email(email1)
+        test_db.insert_email(email2)
+
+        work_emails = test_db.get_emails_by_classification("Work")
+        assert len(work_emails) == 1
+        assert work_emails[0].message_id == "<work1@example.com>"
+
+    def test_count_methods(self, test_db):
+        # Insert various emails
+        email1 = Email(
+            message_id="<classified@example.com>",
+            folder_id="INBOX",
+            subject="Classified",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Work",
+        )
+        email2 = Email(
+            message_id="<unclassified@example.com>",
+            folder_id="INBOX",
+            subject="Unclassified",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+        )
+        email3 = Email(
+            message_id="<spam@example.com>",
+            folder_id="INBOX",
+            subject="Spam",
+            from_addr="spammer@test.com",
+            mbox_path="/path/to/mbox",
+            is_spam=True,
+            classification="Spam",
+        )
+        test_db.insert_email(email1)
+        test_db.insert_email(email2)
+        test_db.insert_email(email3)
+
+        assert test_db.get_total_count() == 3
+        assert test_db.get_classified_count() == 1  # Excludes spam
+        assert test_db.get_spam_count() == 1

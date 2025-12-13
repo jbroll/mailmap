@@ -4,11 +4,13 @@ import asyncio
 import json
 import logging
 import uuid
+from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+from .categories import load_categories, get_category_descriptions
 from .config import WebSocketConfig
 from .database import Database
 from .protocol import Action, Event, Request, Response, ServerEvent, parse_message
@@ -19,9 +21,10 @@ logger = logging.getLogger("mailmap.websocket")
 class WebSocketServer:
     """WebSocket server that manages MailExtension connections."""
 
-    def __init__(self, config: WebSocketConfig, db: Database):
+    def __init__(self, config: WebSocketConfig, db: Database, categories_file: str | Path):
         self.config = config
         self.db = db
+        self.categories_file = Path(categories_file)
         self._clients: dict[str, WebSocketServerProtocol] = {}
         self._pending_requests: dict[str, asyncio.Future] = {}
         self._server = None
@@ -95,7 +98,8 @@ class WebSocketServer:
                 return Response.success(request.id, {"pong": True})
 
             elif request.action == "getFolders":
-                folders = self.db.get_folder_descriptions()
+                categories = load_categories(self.categories_file)
+                folders = get_category_descriptions(categories)
                 return Response.success(request.id, {"folders": folders})
 
             elif request.action == "getClassifications":
@@ -204,7 +208,7 @@ class WebSocketServer:
         return len(self._clients) > 0
 
 
-async def run_websocket_server(config: WebSocketConfig, db: Database) -> None:
+async def run_websocket_server(config: WebSocketConfig, db: Database, categories_file: str | Path) -> None:
     """Run the WebSocket server (for use in asyncio.gather)."""
-    server = WebSocketServer(config, db)
+    server = WebSocketServer(config, db, categories_file)
     await server.start()
