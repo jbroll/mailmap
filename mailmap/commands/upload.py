@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from ..categories import load_categories
@@ -130,7 +129,7 @@ async def cleanup_thunderbird_folders(
         target_account: Target account: 'local', 'imap', or account ID
     """
     from ..protocol import Action
-    from ..websocket_server import WebSocketServer
+    from ..websocket_server import start_websocket_and_wait
 
     # Load category names from categories.txt
     categories = load_categories(config.database.categories_file)
@@ -142,29 +141,20 @@ async def cleanup_thunderbird_folders(
 
     logger.info(f"Will check for {len(category_names)} category folders in {target_account}")
 
-    # Start WebSocket server
+    # Start WebSocket server and wait for connection
     ws_config = config.websocket
     if not ws_config.enabled:
         logger.error("WebSocket is not enabled in config")
         return
 
-    server = WebSocketServer(ws_config, db, config.database.categories_file)
-    server_task = asyncio.create_task(server.start())
-
-    logger.info(f"WebSocket server started on ws://{ws_config.host}:{ws_config.port}")
-    logger.info("Waiting for Thunderbird extension to connect...")
+    result = await start_websocket_and_wait(
+        ws_config, db, config.database.categories_file, timeout=30
+    )
+    if result is None:
+        return
+    server, server_task = result
 
     try:
-        # Wait for extension to connect
-        for _ in range(30):
-            if server.is_connected:
-                break
-            await asyncio.sleep(1)
-        else:
-            logger.error("Timeout waiting for extension to connect")
-            return
-
-        logger.info("Extension connected!")
 
         # Query Thunderbird for existing folders
         response = await server.send_request(

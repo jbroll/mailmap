@@ -151,14 +151,22 @@ class TestSelectTarget:
         with pytest.raises(ValueError, match="not found in Thunderbird profile"):
             select_target(config, mock_ws, "unknown.server.com")
 
-    def test_raises_for_server_without_websocket(self):
-        """Test that server names require WebSocket connection."""
+    def test_falls_back_to_imap_without_websocket(self):
+        """Test that server names fall back to IMAP when WebSocket not available."""
         config = Config(
             imap=ImapConfig(host="imap.example.com"),
             websocket=WebSocketConfig(enabled=True),
         )
-        with pytest.raises(ValueError, match="requires WebSocket connection"):
-            select_target(config, None, "outlook.office365.com")
+        target = select_target(config, None, "outlook.office365.com")
+        assert isinstance(target, ImapTarget)
+
+    def test_select_imap_target_explicitly(self):
+        """Test that target_account='imap' selects ImapTarget."""
+        config = Config(
+            imap=ImapConfig(host="imap.example.com"),
+        )
+        target = select_target(config, None, "imap")
+        assert isinstance(target, ImapTarget)
 
 
 class TestEmailTargetProtocol:

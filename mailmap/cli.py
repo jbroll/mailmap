@@ -102,6 +102,24 @@ def add_limit_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_target_args(parser: argparse.ArgumentParser) -> None:
+    """Add target account and websocket arguments to a parser."""
+    parser.add_argument(
+        "--target-account",
+        type=str,
+        default="local",
+        help="Target account: 'local' (default), 'imap', or IMAP server name",
+    )
+    parser.add_argument(
+        "--websocket",
+        type=int,
+        nargs="?",
+        const=9753,
+        metavar="PORT",
+        help="Use WebSocket target (requires Thunderbird extension). Default port: 9753",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
@@ -146,12 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Move classified emails to target folders via Thunderbird extension",
     )
-    classify_parser.add_argument(
-        "--target-account",
-        type=str,
-        default="local",
-        help="Target account: 'local' (default) or IMAP server name (e.g., outlook.office365.com)",
-    )
+    add_target_args(classify_parser)
 
     # init - Initialize folder structure
     init_parser = subparsers.add_parser("init", help="Analyze emails and suggest folder structure")
@@ -210,12 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cleanup", help="Delete classification folders from Thunderbird Local Folders"
     )
     add_common_args(cleanup_parser)
-    cleanup_parser.add_argument(
-        "--target-account",
-        type=str,
-        default="local",
-        help="Target account: 'local' (default) or IMAP server name (e.g., outlook.office365.com)",
-    )
+    add_target_args(cleanup_parser)
 
     # folders - List folders with counts
     folders_parser = subparsers.add_parser("folders", help="List folders with email counts")
@@ -319,7 +327,8 @@ def main() -> None:
         copy_mode = getattr(args, "copy", False)
         move_mode = getattr(args, "move", False)
         target_account = getattr(args, "target_account", "local")
-        asyncio.run(run_bulk_classify(config, db, copy=copy_mode, move=move_mode, target_account=target_account))
+        websocket_port = getattr(args, "websocket", None)
+        asyncio.run(run_bulk_classify(config, db, copy=copy_mode, move=move_mode, target_account=target_account, websocket_port=websocket_port))
     elif args.command == "upload":
         dry_run = getattr(args, "dry_run", False)
         folder_filter = getattr(args, "upload_folder", None)

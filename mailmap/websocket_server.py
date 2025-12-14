@@ -216,3 +216,38 @@ async def run_websocket_server(config: WebSocketConfig, db: Database, categories
     """Run the WebSocket server (for use in asyncio.gather)."""
     server = WebSocketServer(config, db, categories_file)
     await server.start()
+
+
+async def start_websocket_and_wait(
+    config: WebSocketConfig,
+    db: Database,
+    categories_file: str | Path,
+    timeout: int = 60,
+) -> tuple[WebSocketServer, asyncio.Task] | None:
+    """Start WebSocket server and wait for extension to connect.
+
+    Args:
+        config: WebSocket configuration
+        db: Database instance
+        categories_file: Path to categories file
+        timeout: Seconds to wait for connection (default 60)
+
+    Returns:
+        Tuple of (server, task) if connected, None if timeout
+    """
+    server = WebSocketServer(config, db, categories_file)
+    server_task = asyncio.create_task(server.start())
+
+    logger.info(f"WebSocket server started on ws://{config.host}:{config.port}")
+    logger.info("Waiting for Thunderbird extension to connect...")
+
+    for _ in range(timeout):
+        if server.is_connected:
+            logger.info("Extension connected!")
+            return server, server_task
+        await asyncio.sleep(1)
+
+    logger.error("Timeout waiting for extension to connect")
+    await server.stop()
+    server_task.cancel()
+    return None

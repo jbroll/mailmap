@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -249,17 +248,20 @@ async def run_bulk_classify(
     copy: bool = False,
     move: bool = False,
     target_account: str = "local",
+    websocket_port: int | None = None,
 ) -> None:
     """Run bulk classification mode.
 
     Args:
         config: Application configuration
         db: Database instance
-        copy: If True, copy classified emails to target folders via extension
-        move: If True, move classified emails to target folders via extension
+        copy: If True, copy classified emails to target folders
+        move: If True, move classified emails to target folders
         target_account: Target account for folders: 'local', 'imap', or account ID
+        websocket_port: If provided, use WebSocket on this port (requires Thunderbird extension)
     """
-    from ..websocket_server import WebSocketServer
+    from ..config import WebSocketConfig
+    from ..websocket_server import start_websocket_and_wait
 
     if copy and move:
         logger.error("Cannot specify both --copy and --move")
@@ -272,31 +274,26 @@ async def run_bulk_classify(
     server_task = None
 
     try:
-        # If copy or move requested, start WebSocket server and wait for extension
-        if copy or move:
-            ws_config = config.websocket
-            if not ws_config.enabled:
-                logger.error("WebSocket is not enabled in config. Add [websocket] section with enabled=true")
+        # If copy or move requested with WebSocket, start server and wait for extension
+        if (copy or move) and websocket_port is not None:
+            ws_config = WebSocketConfig(
+                enabled=True,
+                host="localhost",
+                port=websocket_port,
+                auth_token=config.websocket.auth_token if config.websocket else "",
+            )
+
+            result = await start_websocket_and_wait(
+                ws_config, db, config.database.categories_file
+            )
+            if result is None:
                 return
+            ws_server, server_task = result
 
-            ws_server = WebSocketServer(ws_config, db, config.database.categories_file)
-            server_task = asyncio.create_task(ws_server.start())
-
-            logger.info(f"WebSocket server started on ws://{ws_config.host}:{ws_config.port}")
-            logger.info("Waiting for Thunderbird extension to connect...")
-
-            # Wait for extension to connect (timeout after 60 seconds)
-            for _ in range(60):
-                if ws_server.is_connected:
-                    break
-                await asyncio.sleep(1)
-            else:
-                logger.error("Timeout waiting for extension to connect")
-                await ws_server.stop()
-                server_task.cancel()
-                return
-
-            logger.info("Extension connected! Starting classification with immediate copy/move...")
+            logger.info("Starting classification with immediate copy/move...")
+        elif (copy or move) and target_account == "local":
+            logger.error("Target 'local' requires --websocket. Use --target-account imap for direct IMAP.")
+            return
 
         # Use the new abstraction-based classify function
         await bulk_classify(
