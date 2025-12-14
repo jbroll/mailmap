@@ -263,6 +263,98 @@ class TestTransferSingleEmail:
         assert elapsed >= 0.1
 
 
+class TestConsecutiveFailures:
+    """Tests for consecutive failure handling."""
+
+    @pytest.fixture
+    def email_records(self):
+        """Create multiple test email records."""
+        return [
+            Email(
+                message_id=f"<msg{i}@example.com>",
+                folder_id="INBOX",
+                subject=f"Test Subject {i}",
+                from_addr="sender@example.com",
+                mbox_path="",
+                classification="Work",
+                confidence=0.95,
+                processed_at=datetime.now(),
+            )
+            for i in range(10)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_consecutive_failures_stops_transfer(self, email_records):
+        """Test that transfer stops after max consecutive failures."""
+        mock_target = AsyncMock()
+        mock_target.copy_email = AsyncMock(return_value=False)  # Always fail
+        mock_db = MagicMock()
+
+        stats = ProcessingStats()
+        consecutive_failures = 0
+        max_consecutive_failures = 3
+        transferred = 0
+
+        for email_record in email_records:
+            success = await _transfer_single_email(
+                email_record=email_record,
+                target=mock_target,
+                db=mock_db,
+                move=False,
+                stats=stats,
+                rate_limit=0.0,
+            )
+
+            if success:
+                consecutive_failures = 0
+                transferred += 1
+            else:
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    break
+
+        # Should have stopped after 3 failures
+        assert stats.failed == 3
+        assert transferred == 0
+        assert mock_target.copy_email.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_success_resets_consecutive_failures(self, email_records):
+        """Test that a success resets the consecutive failure counter."""
+        mock_target = AsyncMock()
+        # Fail twice, succeed once, fail twice, succeed - should continue
+        mock_target.copy_email = AsyncMock(
+            side_effect=[False, False, True, False, False, True, True, True, True, True]
+        )
+        mock_db = MagicMock()
+
+        stats = ProcessingStats()
+        consecutive_failures = 0
+        max_consecutive_failures = 3
+
+        for email_record in email_records:
+            success = await _transfer_single_email(
+                email_record=email_record,
+                target=mock_target,
+                db=mock_db,
+                move=False,
+                stats=stats,
+                rate_limit=0.0,
+            )
+
+            if success:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    break
+
+        # Should process all 10 (4 failures, 6 successes)
+        assert stats.failed == 4
+        assert stats.copied == 6
+        assert mock_target.copy_email.call_count == 10
+
+
 class TestProcessingStats:
     """Tests for ProcessingStats dataclass."""
 
