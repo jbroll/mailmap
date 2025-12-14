@@ -262,3 +262,29 @@ class Database:
             "SELECT COUNT(*) as count FROM emails WHERE classification IS NOT NULL AND is_spam = 0"
         ).fetchone()
         return row["count"] if row else 0
+
+    def get_recent_classifications(self, limit: int = 50) -> list[Email]:
+        """Get recently classified emails."""
+        rows = self.conn.execute(
+            """
+            SELECT * FROM emails
+            WHERE classification IS NOT NULL
+            ORDER BY processed_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [self._row_to_email(row) for row in rows]
+
+    def get_classification_summary(self) -> list[tuple[str, int]]:
+        """Get classification counts grouped by category (excluding spam)."""
+        rows = self.conn.execute(
+            """
+            SELECT classification, COUNT(*) as count
+            FROM emails
+            WHERE classification IS NOT NULL AND is_spam = 0
+            GROUP BY classification
+            ORDER BY count DESC
+            """
+        ).fetchall()
+        return [(row["classification"], row["count"]) for row in rows]

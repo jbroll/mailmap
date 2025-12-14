@@ -108,15 +108,17 @@ def test_db(temp_dir):
 
 
 @pytest.fixture
-def sample_config_toml(temp_dir):
+def sample_config_toml(temp_dir, monkeypatch):
     """Create a sample TOML config file."""
+    # Password must come from environment variable
+    monkeypatch.setenv("MAILMAP_IMAP_PASSWORD", "secret")
+
     config_path = temp_dir / "config.toml"
     config_path.write_text('''
 [imap]
 host = "imap.test.com"
 port = 993
 username = "user@test.com"
-password = "secret"
 use_ssl = true
 idle_folders = ["INBOX", "Important"]
 poll_interval_seconds = 120

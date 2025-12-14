@@ -681,111 +681,6 @@ async def bulk_classify(
     return classifications
 
 
-async def send_to_extension(
-    config: Config,
-    classifications: list[tuple[str, str]],
-    move: bool = False,
-    target_account: str = "local",
-) -> None:
-    """Send copy/move commands to Thunderbird extension via WebSocket.
-
-    Args:
-        config: Application configuration
-        classifications: List of (message_id, target_folder) tuples
-        move: If True, move messages; otherwise copy
-        target_account: Target account for folders: 'local', 'imap', or account ID
-    """
-    from collections import defaultdict
-
-    from .protocol import Action
-    from .websocket_server import WebSocketServer
-
-    # Group by target folder
-    by_folder: dict[str, list[str]] = defaultdict(list)
-    for message_id, folder in classifications:
-        by_folder[folder].append(message_id)
-
-    logger.info(f"Preparing to {'move' if move else 'copy'} {len(classifications)} emails to {len(by_folder)} folders")
-    logger.info(f"Target account: {target_account}")
-
-    # Start WebSocket server
-    ws_config = config.websocket
-    if not ws_config.enabled:
-        logger.error("WebSocket is not enabled in config. Add [websocket] section with enabled=true")
-        return
-
-    # Create a temporary database connection for the server (it needs one for queries)
-    from .database import Database
-    temp_db = Database(config.database.path)
-    temp_db.connect()
-
-    try:
-        server = WebSocketServer(ws_config, temp_db, config.database.categories_file)
-
-        # Start server in background
-        server_task = asyncio.create_task(server.start())
-
-        logger.info(f"WebSocket server started on ws://{ws_config.host}:{ws_config.port}")
-        logger.info("Waiting for Thunderbird extension to connect...")
-
-        # Wait for extension to connect (timeout after 60 seconds)
-        for _ in range(60):
-            if server.is_connected:
-                break
-            await asyncio.sleep(1)
-        else:
-            logger.error("Timeout waiting for extension to connect")
-            await server.stop()
-            server_task.cancel()
-            return
-
-        logger.info("Extension connected!")
-
-        # Send copy/move commands for each folder
-        action = Action.MOVE_MESSAGES if move else Action.COPY_MESSAGES
-        total_success = 0
-        total_failed = 0
-
-        for folder, message_ids in by_folder.items():
-            logger.info(f"  {'Moving' if move else 'Copying'} {len(message_ids)} emails to {folder}...")
-
-            # Build target folder spec with account
-            target_folder_spec: dict[str, str] = {"path": folder}
-            if target_account:
-                target_folder_spec["accountId"] = target_account
-
-            response = await server.send_request(
-                action,
-                {
-                    "headerMessageIds": message_ids,
-                    "targetFolder": target_folder_spec,
-                },
-                timeout=60.0,
-            )
-
-            if response and response.ok:
-                result = response.result or {}
-                success_count = result.get("moved" if move else "copied", 0)
-                not_found = result.get("notFound", [])
-                total_success += success_count
-                total_failed += len(not_found)
-                if not_found:
-                    logger.warning(f"    {len(not_found)} messages not found in Thunderbird")
-            else:
-                error = response.error if response else "No response"
-                logger.error(f"    Failed: {error}")
-                total_failed += len(message_ids)
-
-        logger.info(f"Complete: {total_success} {'moved' if move else 'copied'}, {total_failed} failed")
-
-        # Stop server
-        await server.stop()
-        server_task.cancel()
-
-    finally:
-        temp_db.close()
-
-
 async def run_bulk_classify(
     config: Config,
     db: Database,
@@ -857,39 +752,26 @@ async def run_bulk_classify(
 
 def list_classifications(db: Database, limit: int = 50) -> None:
     """List classification results from the database."""
-    db.connect()
-    db.init_schema()
-    try:
-        rows = db.conn.execute(
-            """
-            SELECT message_id, folder_id, subject, from_addr, classification, confidence, processed_at
-            FROM emails
-            WHERE classification IS NOT NULL
-            ORDER BY processed_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+    with db:
+        emails = db.get_recent_classifications(limit)
 
-        if not rows:
+        if not emails:
             print("No classification results found.")
             return
 
         print(f"{'Subject':<40} {'From':<25} {'Original':<15} {'Predicted':<15} {'Conf':<6}")
         print("-" * 105)
 
-        for row in rows:
-            subject = (row["subject"] or "")[:38]
-            from_addr = (row["from_addr"] or "")[:23]
-            folder = (row["folder_id"] or "")[:13]
-            classification = (row["classification"] or "")[:13]
-            confidence = row["confidence"] or 0
+        for email in emails:
+            subject = (email.subject or "")[:38]
+            from_addr = (email.from_addr or "")[:23]
+            folder = (email.folder_id or "")[:13]
+            classification = (email.classification or "")[:13]
+            confidence = email.confidence or 0
 
             print(f"{subject:<40} {from_addr:<25} {folder:<15} {classification:<15} {confidence:.2f}")
 
-        print(f"\nTotal: {len(rows)} results (showing up to {limit})")
-    finally:
-        db.close()
+        print(f"\nTotal: {len(emails)} results (showing up to {limit})")
 
 
 def list_categories_cmd(config: Config) -> None:
@@ -929,37 +811,25 @@ def clear_cmd(db: Database, folder: str | None = None) -> None:
 
 def summary_cmd(db: Database) -> None:
     """Show classification summary with counts per category."""
-    db.connect()
-    db.init_schema()
-    try:
+    with db:
         total = db.get_total_count()
         classified = db.get_classified_count()
         spam = db.get_spam_count()
         unclassified = total - classified - spam
 
-        # Get counts per classification (excluding spam)
-        rows = db.conn.execute(
-            """
-            SELECT classification, COUNT(*) as count
-            FROM emails
-            WHERE classification IS NOT NULL AND is_spam = 0
-            GROUP BY classification
-            ORDER BY count DESC
-            """
-        ).fetchall()
+        summary = db.get_classification_summary()
 
-        if not rows and spam == 0:
+        if not summary and spam == 0:
             print("No classified emails found.")
             return
 
         print(f"{'Category':<35} {'Count':>8} {'Percent':>8}")
         print("-" * 53)
 
-        for row in rows:
-            category = (row["classification"] or "")[:33]
-            count = row["count"]
+        for category, count in summary:
+            category_str = (category or "")[:33]
             pct = 100 * count / total if total > 0 else 0
-            print(f"{category:<35} {count:>8} {pct:>7.1f}%")
+            print(f"{category_str:<35} {count:>8} {pct:>7.1f}%")
 
         print("-" * 53)
         print(f"{'Classified':<35} {classified:>8} {100*classified/total if total else 0:>7.1f}%")
@@ -968,8 +838,6 @@ def summary_cmd(db: Database) -> None:
         if unclassified > 0:
             print(f"{'Unclassified':<35} {unclassified:>8} {100*unclassified/total if total else 0:>7.1f}%")
         print(f"{'Total':<35} {total:>8}")
-    finally:
-        db.close()
 
 
 async def init_folders_from_samples(config: Config) -> None:

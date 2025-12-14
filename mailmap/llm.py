@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -14,6 +15,9 @@ from .content import extract_email_summary
 # Directory containing prompt templates
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
+# Valid prompt name pattern: alphanumeric, dash, underscore only
+PROMPT_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+
 # Module-level logger
 logger = logging.getLogger("mailmap")
 
@@ -23,28 +27,28 @@ def load_prompt(name: str) -> str:
     """Load a prompt template from the prompts directory (cached).
 
     Args:
-        name: Name of the prompt template (without .txt extension)
+        name: Name of the prompt template (alphanumeric, dash, underscore only)
 
     Returns:
         The prompt template content
 
     Raises:
-        ValueError: If name contains path traversal characters
+        ValueError: If name is invalid
         FileNotFoundError: If prompt template doesn't exist
     """
-    # Sanitize input - prevent path traversal
-    if '/' in name or '\\' in name or '..' in name:
+    if not PROMPT_NAME_PATTERN.match(name):
         raise ValueError(f"Invalid prompt name: {name}")
 
-    prompt_path = PROMPTS_DIR / f"{name}.txt"
-    prompt_path = prompt_path.resolve()
+    prompt_path = (PROMPTS_DIR / f"{name}.txt").resolve()
 
-    # Ensure path is within PROMPTS_DIR
-    if not str(prompt_path).startswith(str(PROMPTS_DIR.resolve())):
-        raise ValueError(f"Path traversal attempt: {name}")
+    # Verify path is within PROMPTS_DIR
+    try:
+        prompt_path.relative_to(PROMPTS_DIR.resolve())
+    except ValueError:
+        raise ValueError(f"Invalid prompt name: {name}") from None
 
     if not prompt_path.exists():
-        raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+        raise FileNotFoundError(f"Prompt template not found: {name}")
 
     return prompt_path.read_text()
 

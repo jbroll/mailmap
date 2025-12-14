@@ -4,9 +4,13 @@
 [imap]
 host = "imap.example.com"
 port = 993
-username = "your-email@example.com"
-password = "your-password"
 use_ssl = true
+# SECURITY: Set credentials via environment variables (recommended):
+#   export MAILMAP_IMAP_USERNAME="your-email@example.com"
+#   export MAILMAP_IMAP_PASSWORD="your-password"
+# Or uncomment below (less secure - ensure config.toml is not committed):
+# username = "your-email@example.com"
+# password = "your-password"
 # Folders to monitor with IDLE (real-time notifications)
 idle_folders = ["INBOX"]
 # Polling interval for other folders (in seconds)

@@ -55,6 +55,17 @@ class WebSocketServer:
     async def _handle_client(self, websocket: ServerConnection) -> None:
         """Handle a client connection."""
         client_id = str(uuid.uuid4())[:8]
+
+        # Check authentication if token is configured
+        if self.config.auth_token:
+            token = ""
+            if websocket.request and websocket.request.headers:
+                token = websocket.request.headers.get("X-Mailmap-Token", "")
+            if token != self.config.auth_token:
+                logger.warning(f"Rejected connection from {websocket.remote_address}: invalid token")
+                await websocket.close(1008, "Authentication failed")
+                return
+
         self._clients[client_id] = websocket
         logger.info(f"Client {client_id} connected from {websocket.remote_address}")
 
@@ -121,27 +132,18 @@ class WebSocketServer:
 
     def _get_recent_classifications(self, limit: int) -> list[dict]:
         """Get recent classifications from database."""
-        rows = self.db.conn.execute(
-            """
-            SELECT message_id, subject, from_addr, classification, confidence, processed_at
-            FROM emails
-            WHERE classification IS NOT NULL
-            ORDER BY processed_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        emails = self.db.get_recent_classifications(limit)
 
         return [
             {
-                "messageId": row["message_id"],
-                "subject": row["subject"],
-                "from": row["from_addr"],
-                "folder": row["classification"],
-                "confidence": row["confidence"],
-                "processedAt": row["processed_at"],
+                "messageId": email.message_id,
+                "subject": email.subject,
+                "from": email.from_addr,
+                "folder": email.classification,
+                "confidence": email.confidence,
+                "processedAt": str(email.processed_at) if email.processed_at else None,
             }
-            for row in rows
+            for email in emails
         ]
 
     async def send_request(

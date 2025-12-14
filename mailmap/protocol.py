@@ -99,11 +99,20 @@ class ServerEvent:
         )
 
 
+MAX_MESSAGE_SIZE = 1024 * 1024  # 1MB
+
+
 def parse_message(raw: str) -> Request | Response | None:
     """Parse a JSON message into Request or Response."""
+    if len(raw) > MAX_MESSAGE_SIZE:
+        return None
+
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
+        return None
+
+    if not isinstance(data, dict):
         return None
 
     if "action" in data:

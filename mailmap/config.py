@@ -1,29 +1,32 @@
 """Configuration management for mailmap."""
 
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ImapConfig:
     """IMAP server configuration.
 
-    Credentials can be provided via environment variables:
-    - MAILMAP_IMAP_USERNAME: IMAP username (overrides config file)
-    - MAILMAP_IMAP_PASSWORD: IMAP password (overrides config file)
+    Credentials MUST be provided via environment variables:
+    - MAILMAP_IMAP_USERNAME: IMAP username
+    - MAILMAP_IMAP_PASSWORD: IMAP password
     """
     host: str
     port: int = 993
     username: str = ""
-    password: str = ""
+    password: str = field(default="", repr=False)
     use_ssl: bool = True
     idle_folders: list[str] = field(default_factory=lambda: ["INBOX"])
     poll_interval_seconds: int = 300
 
     def __post_init__(self):
-        """Apply environment variable overrides for credentials."""
+        """Load credentials from environment variables."""
         env_username = os.environ.get("MAILMAP_IMAP_USERNAME")
         env_password = os.environ.get("MAILMAP_IMAP_PASSWORD")
 
@@ -60,10 +63,20 @@ class ThunderbirdConfig:
 
 @dataclass
 class WebSocketConfig:
-    """WebSocket server configuration for Thunderbird MailExtension communication."""
+    """WebSocket server configuration for Thunderbird MailExtension communication.
+
+    Authentication token can be set via MAILMAP_WS_TOKEN environment variable.
+    """
     enabled: bool = False
     host: str = "127.0.0.1"  # Localhost only for security
     port: int = 9753
+    auth_token: str = field(default="", repr=False)
+
+    def __post_init__(self):
+        """Load auth token from environment."""
+        env_token = os.environ.get("MAILMAP_WS_TOKEN")
+        if env_token:
+            self.auth_token = env_token
 
 
 # Default spam rules covering common spam filters
@@ -144,7 +157,6 @@ def load_config(path: str | Path) -> Config:
         host=imap_data.get("host", ""),
         port=imap_data.get("port", 993),
         username=imap_data.get("username", ""),
-        password=imap_data.get("password", ""),
         use_ssl=imap_data.get("use_ssl", True),
         idle_folders=imap_data.get("idle_folders", ["INBOX"]),
         poll_interval_seconds=imap_data.get("poll_interval_seconds", 300),

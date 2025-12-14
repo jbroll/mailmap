@@ -169,6 +169,46 @@ def list_mbox_files(mail_dir: Path) -> list[tuple[str, Path]]:
     return mbox_files
 
 
+def _open_mbox(mbox_path: Path) -> mailbox.mbox | None:
+    """Open an mbox file with error handling."""
+    try:
+        return mailbox.mbox(mbox_path)
+    except PermissionError as e:
+        logger.warning(f"Permission denied opening mbox {mbox_path}: {e}")
+    except FileNotFoundError as e:
+        logger.warning(f"Mbox file not found {mbox_path}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to open mbox {mbox_path}: {e}")
+    return None
+
+
+def _parse_message(
+    message, folder_name: str, mbox_path_str: str
+) -> ThunderbirdEmail | None:
+    """Parse a mailbox message into ThunderbirdEmail."""
+    try:
+        message_id = message.get("Message-ID", f"<tb-{hash(str(message))}@local>")
+        subject = decode_mime_header(message.get("Subject"))
+        from_addr = decode_mime_header(message.get("From"))
+        body = extract_body(message)
+        headers = extract_spam_headers(message)
+
+        return ThunderbirdEmail(
+            message_id=message_id,
+            folder=folder_name,
+            subject=subject,
+            from_addr=from_addr,
+            body_text=body,
+            mbox_path=mbox_path_str,
+            headers=headers if headers else None,
+        )
+    except (UnicodeDecodeError, LookupError) as e:
+        logger.debug(f"Encoding error parsing email in {folder_name}: {e}")
+    except Exception as e:
+        logger.warning(f"Failed to parse email in {folder_name}: {e}")
+    return None
+
+
 def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> Iterator[ThunderbirdEmail]:
     """Read emails from an mbox file.
 
@@ -180,16 +220,8 @@ def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> It
     Yields:
         ThunderbirdEmail objects for each successfully parsed email
     """
-    try:
-        mbox = mailbox.mbox(mbox_path)
-    except PermissionError as e:
-        logger.warning(f"Permission denied opening mbox {mbox_path}: {e}")
-        return
-    except FileNotFoundError as e:
-        logger.warning(f"Mbox file not found {mbox_path}: {e}")
-        return
-    except Exception as e:
-        logger.error(f"Failed to open mbox {mbox_path}: {e}")
+    mbox = _open_mbox(mbox_path)
+    if mbox is None:
         return
 
     mbox_path_str = str(mbox_path)
@@ -198,29 +230,10 @@ def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> It
         if limit and count >= limit:
             break
 
-        try:
-            message_id = message.get("Message-ID", f"<tb-{hash(str(message))}@local>")
-            subject = decode_mime_header(message.get("Subject"))
-            from_addr = decode_mime_header(message.get("From"))
-            body = extract_body(message)
-            headers = extract_spam_headers(message)
-
-            yield ThunderbirdEmail(
-                message_id=message_id,
-                folder=folder_name,
-                subject=subject,
-                from_addr=from_addr,
-                body_text=body,
-                mbox_path=mbox_path_str,
-                headers=headers if headers else None,
-            )
+        email = _parse_message(message, folder_name, mbox_path_str)
+        if email:
+            yield email
             count += 1
-        except (UnicodeDecodeError, LookupError) as e:
-            logger.debug(f"Encoding error parsing email in {folder_name}: {e}")
-            continue
-        except Exception as e:
-            logger.warning(f"Failed to parse email in {folder_name}: {e}")
-            continue
 
     mbox.close()
 
@@ -242,20 +255,11 @@ def read_mbox_random(
     """
     import random
 
-    try:
-        mbox = mailbox.mbox(mbox_path)
-    except PermissionError as e:
-        logger.warning(f"Permission denied opening mbox {mbox_path}: {e}")
-        return
-    except FileNotFoundError as e:
-        logger.warning(f"Mbox file not found {mbox_path}: {e}")
-        return
-    except Exception as e:
-        logger.error(f"Failed to open mbox {mbox_path}: {e}")
+    mbox = _open_mbox(mbox_path)
+    if mbox is None:
         return
 
     try:
-        # Get all message keys
         keys = list(mbox.keys())
         total = len(keys)
 
@@ -272,35 +276,14 @@ def read_mbox_random(
             logger.info(f"Randomly sampling {sample_size} of {total} emails from {folder_name}")
 
         sampled_keys = random.sample(keys, sample_size)
-
         mbox_path_str = str(mbox_path)
         yielded = 0
 
         for key in sampled_keys:
-            try:
-                message = mbox[key]
-                message_id = message.get("Message-ID", f"<tb-{hash(str(message))}@local>")
-                subject = decode_mime_header(message.get("Subject"))
-                from_addr = decode_mime_header(message.get("From"))
-                body = extract_body(message)
-                headers = extract_spam_headers(message)
-
-                yield ThunderbirdEmail(
-                    message_id=message_id,
-                    folder=folder_name,
-                    subject=subject,
-                    from_addr=from_addr,
-                    body_text=body,
-                    mbox_path=mbox_path_str,
-                    headers=headers if headers else None,
-                )
+            email = _parse_message(mbox[key], folder_name, mbox_path_str)
+            if email:
+                yield email
                 yielded += 1
-            except (UnicodeDecodeError, LookupError) as e:
-                logger.debug(f"Encoding error parsing email in {folder_name}: {e}")
-                continue
-            except Exception as e:
-                logger.warning(f"Failed to parse email in {folder_name}: {e}")
-                continue
 
         logger.info(f"Successfully read {yielded} emails from {folder_name}")
     finally:
@@ -311,12 +294,19 @@ def get_raw_email(mbox_path: str, message_id: str) -> bytes | None:
     """Retrieve the raw email content from an mbox file by message_id.
 
     Args:
-        mbox_path: Path to the mbox file
+        mbox_path: Path to the mbox file (must be within ImapMail or Mail directory)
         message_id: Message-ID header to search for
 
     Returns:
         Raw email bytes if found, None otherwise
     """
+    # Validate path is within expected Thunderbird directories
+    path = Path(mbox_path).resolve()
+    path_str = str(path)
+    if "/ImapMail/" not in path_str and "/Mail/" not in path_str:
+        logger.error(f"Rejected mbox path outside Thunderbird directories: {mbox_path}")
+        return None
+
     try:
         mbox = mailbox.mbox(mbox_path)
     except Exception as e:
@@ -326,7 +316,6 @@ def get_raw_email(mbox_path: str, message_id: str) -> bytes | None:
     try:
         for message in mbox:
             if message.get("Message-ID") == message_id:
-                # Get the raw bytes of the message
                 return message.as_bytes()
     except Exception as e:
         logger.error(f"Error reading mbox {mbox_path}: {e}")
