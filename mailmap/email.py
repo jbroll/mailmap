@@ -37,6 +37,7 @@ class UnifiedEmail:
             source_type="thunderbird",
             source_ref=tb_email.mbox_path,
             headers=tb_email.headers or {},
+            raw_bytes=tb_email.raw_bytes,
         )
 
     @classmethod

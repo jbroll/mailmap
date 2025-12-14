@@ -84,15 +84,16 @@ class ThunderbirdSource:
         reader = self._reader  # Capture for lambda
 
         # Read emails synchronously in executor
+        # Always include raw bytes for potential cross-server transfers
         if random_sample and limit:
             emails = await loop.run_in_executor(
                 None,
-                lambda: list(reader.read_folder_random(folder, limit)),
+                lambda: list(reader.read_folder_random(folder, limit, include_raw=True)),
             )
         else:
             emails = await loop.run_in_executor(
                 None,
-                lambda: list(reader.read_folder(folder, limit)),
+                lambda: list(reader.read_folder(folder, limit, include_raw=True)),
             )
 
         # Yield as UnifiedEmail

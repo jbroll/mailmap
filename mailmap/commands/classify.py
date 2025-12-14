@@ -57,13 +57,18 @@ async def _get_raw_bytes(email: UnifiedEmail) -> bytes | None:
 
     # For Thunderbird source, load from mbox file
     if email.source_type == "thunderbird" and email.source_ref:
+        start = time.time()
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None,
             get_raw_email,
             str(email.source_ref),
             email.message_id,
         )
+        elapsed = time.time() - start
+        if elapsed > 1.0:
+            logger.debug(f"  mbox read took {elapsed:.1f}s for {email.message_id[:30]}...")
+        return result
 
     # For other sources, raw_bytes must be pre-populated or we return None
     # (IMAP target will try to find email on server)
@@ -89,15 +94,19 @@ async def _process_single_email(
     """
     async with semaphore:
         action_past = "moved" if move else "copied"
+        total_start = time.time()
 
         try:
             # Classify email
+            llm_start = time.time()
             result = await llm.classify_email(
                 email.subject,
                 email.from_addr,
                 email.body_text,
                 folder_descriptions,
             )
+            llm_elapsed = time.time() - llm_start
+
             db.update_classification(
                 email.message_id,
                 result.predicted_folder,
@@ -114,12 +123,19 @@ async def _process_single_email(
                 )
 
                 # Get raw bytes for cross-server transfers
+                raw_start = time.time()
                 raw_bytes = await _get_raw_bytes(email)
+                raw_elapsed = time.time() - raw_start
 
+                upload_start = time.time()
                 if move:
                     success = await target.move_email(email.message_id, target_folder, raw_bytes)
                 else:
                     success = await target.copy_email(email.message_id, target_folder, raw_bytes)
+                upload_elapsed = time.time() - upload_start
+
+                total_elapsed = time.time() - total_start
+                timing_info = f"[llm:{llm_elapsed:.1f}s raw:{raw_elapsed:.1f}s upload:{upload_elapsed:.1f}s total:{total_elapsed:.1f}s]"
 
                 if success:
                     await stats.increment(copied=1)
@@ -129,11 +145,14 @@ async def _process_single_email(
                         else f" (low: {result.confidence:.0%})"
                     )
                     logger.info(
-                        f"  {action_past}: {email.subject[:40]}... -> {target_folder}{conf_str}"
+                        f"  {action_past}: {email.subject[:40]}... -> {target_folder}{conf_str} {timing_info}"
                     )
                 else:
                     await stats.increment(failed=1)
-                    logger.warning(f"  Failed to {action_past}: {email.message_id}")
+                    logger.warning(f"  Failed to {action_past}: {email.message_id} {timing_info}")
+            else:
+                total_elapsed = time.time() - total_start
+                logger.debug(f"  classified: {email.subject[:40]}... -> {result.predicted_folder} [llm:{llm_elapsed:.1f}s total:{total_elapsed:.1f}s]")
 
             return (email.message_id, result.predicted_folder)
 

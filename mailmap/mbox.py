@@ -85,6 +85,7 @@ class ThunderbirdEmail:
     body_text: str  # For LLM classification
     mbox_path: str  # For later retrieval of raw email
     headers: dict[str, str] | None = None  # Spam-related headers for filtering
+    raw_bytes: bytes | None = None  # Raw email for cross-server transfers
 
 
 def list_mbox_files(mail_dir: Path) -> list[tuple[str, Path]]:
@@ -126,15 +127,23 @@ def _open_mbox(mbox_path: Path) -> mailbox.mbox | None:
 
 
 def _parse_message(
-    message, folder_name: str, mbox_path_str: str
+    message, folder_name: str, mbox_path_str: str, include_raw: bool = False
 ) -> ThunderbirdEmail | None:
-    """Parse a mailbox message into ThunderbirdEmail."""
+    """Parse a mailbox message into ThunderbirdEmail.
+
+    Args:
+        message: mailbox.Message object
+        folder_name: Name of the folder
+        mbox_path_str: Path to mbox file as string
+        include_raw: If True, capture raw bytes for cross-server transfers
+    """
     try:
         message_id = message.get("Message-ID", f"<tb-{hash(str(message))}@local>")
         subject = decode_mime_header(message.get("Subject"))
         from_addr = decode_mime_header(message.get("From"))
         body = extract_body(message)
         headers = extract_spam_headers(message)
+        raw_bytes = message.as_bytes() if include_raw else None
 
         return ThunderbirdEmail(
             message_id=message_id,
@@ -144,6 +153,7 @@ def _parse_message(
             body_text=body,
             mbox_path=mbox_path_str,
             headers=headers if headers else None,
+            raw_bytes=raw_bytes,
         )
     except (UnicodeDecodeError, LookupError) as e:
         logger.debug(f"Encoding error parsing email in {folder_name}: {e}")
@@ -152,13 +162,16 @@ def _parse_message(
     return None
 
 
-def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> Iterator[ThunderbirdEmail]:
+def read_mbox(
+    mbox_path: Path, folder_name: str, limit: int | None = None, include_raw: bool = False
+) -> Iterator[ThunderbirdEmail]:
     """Read emails from an mbox file.
 
     Args:
         mbox_path: Path to the mbox file
         folder_name: Name to assign to the folder
         limit: Maximum number of emails to read (None for all)
+        include_raw: If True, capture raw bytes for cross-server transfers
 
     Yields:
         ThunderbirdEmail objects for each successfully parsed email
@@ -173,7 +186,7 @@ def read_mbox(mbox_path: Path, folder_name: str, limit: int | None = None) -> It
         if limit and count >= limit:
             break
 
-        email = _parse_message(message, folder_name, mbox_path_str)
+        email = _parse_message(message, folder_name, mbox_path_str, include_raw)
         if email:
             yield email
             count += 1
@@ -185,6 +198,7 @@ def read_mbox_random(
     mbox_path: Path,
     folder_name: str,
     limit: int | float,
+    include_raw: bool = False,
 ) -> Iterator[ThunderbirdEmail]:
     """Read a random sample of emails from an mbox file.
 
@@ -192,6 +206,7 @@ def read_mbox_random(
         mbox_path: Path to the mbox file
         folder_name: Name to assign to the folder
         limit: Number of emails (int >= 1) or fraction to sample (float 0-1)
+        include_raw: If True, capture raw bytes for cross-server transfers
 
     Yields:
         ThunderbirdEmail objects for each successfully parsed email
@@ -223,7 +238,7 @@ def read_mbox_random(
         yielded = 0
 
         for key in sampled_keys:
-            email = _parse_message(mbox[key], folder_name, mbox_path_str)
+            email = _parse_message(mbox[key], folder_name, mbox_path_str, include_raw)
             if email:
                 yield email
                 yielded += 1

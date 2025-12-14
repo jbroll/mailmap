@@ -184,12 +184,14 @@ class ThunderbirdReader:
         self,
         folder_spec: str,
         limit: int | None = None,
+        include_raw: bool = False,
     ) -> Iterator[ThunderbirdEmail]:
         """Read emails from a specific folder.
 
         Args:
             folder_spec: Folder name or "server:folder" for disambiguation
             limit: Maximum number of emails to read
+            include_raw: If True, capture raw bytes for cross-server transfers
 
         Raises:
             ValueError: If folder not found or ambiguous
@@ -200,7 +202,7 @@ class ThunderbirdReader:
         imap_dir = self.profile_path / "ImapMail" / server
         for name, path in list_mbox_files(imap_dir):
             if name == folder_name:
-                yield from read_mbox(path, folder_name, limit)
+                yield from read_mbox(path, folder_name, limit, include_raw)
                 return
 
     def read_all(
@@ -233,12 +235,14 @@ class ThunderbirdReader:
         self,
         folder_spec: str,
         limit: int | float,
+        include_raw: bool = False,
     ) -> Iterator[ThunderbirdEmail]:
         """Read a random sample of emails from a specific folder.
 
         Args:
             folder_spec: Folder name or "server:folder" for disambiguation
             limit: Number of emails (int >= 1) or fraction to sample (float 0-1)
+            include_raw: If True, capture raw bytes for cross-server transfers
 
         Raises:
             ValueError: If folder not found or ambiguous
@@ -249,5 +253,5 @@ class ThunderbirdReader:
         imap_dir = self.profile_path / "ImapMail" / server
         for name, path in list_mbox_files(imap_dir):
             if name == folder_name:
-                yield from read_mbox_random(path, folder_name, limit)
+                yield from read_mbox_random(path, folder_name, limit, include_raw)
                 return
