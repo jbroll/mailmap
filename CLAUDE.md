@@ -28,11 +28,11 @@ Requires Ollama running locally with a model (default: `qwen2.5:7b`).
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `MAILMAP_IMAP_USERNAME` | Yes | IMAP username/email |
-| `MAILMAP_IMAP_PASSWORD` | Yes | IMAP password (not allowed in config file) |
-| `MAILMAP_WS_TOKEN` | No | WebSocket authentication token |
+| Variable | Description |
+|----------|-------------|
+| `MAILMAP_IMAP_USERNAME` | IMAP username (for daemon, upload, --source-type imap) |
+| `MAILMAP_IMAP_PASSWORD` | IMAP password (not allowed in config file) |
+| `MAILMAP_WS_TOKEN` | WebSocket authentication token (optional) |
 
 ## CLI Commands
 
