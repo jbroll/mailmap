@@ -502,7 +502,7 @@ async def bulk_classify(
 
     # Select source
     try:
-        source = select_source(config)
+        source = select_source(config, config.thunderbird.source_type)
         logger.info(f"Using {source.source_type} source")
     except ValueError as e:
         logger.error(str(e))
@@ -982,7 +982,7 @@ async def init_folders_from_samples(config: Config) -> None:
 
     # Select source automatically
     try:
-        source = select_source(config)
+        source = select_source(config, config.thunderbird.source_type)
         logger.info(f"Using {source.source_type} source")
     except ValueError as e:
         logger.error(str(e))
@@ -1128,6 +1128,8 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
         config.thunderbird.samples_per_folder = args.samples_per_folder
     if getattr(args, "random", False):
         config.thunderbird.random_sample = True
+    if getattr(args, "source_type", None):
+        config.thunderbird.source_type = args.source_type
 
     # Handle --limit (used for import_limit and init_sample_limit)
     import_limit = getattr(args, "import_limit", None)
@@ -1385,6 +1387,13 @@ def add_thunderbird_args(parser: argparse.ArgumentParser) -> None:
         dest="thunderbird_folder",
         help="Process only this folder (e.g., INBOX or server.com:INBOX)",
     )
+    parser.add_argument(
+        "--source-type",
+        type=str,
+        choices=["thunderbird", "imap"],
+        dest="source_type",
+        help="Email source: 'thunderbird' (local cache, default) or 'imap' (direct connection)",
+    )
 
 
 def add_limit_args(parser: argparse.ArgumentParser) -> None:
@@ -1438,7 +1447,7 @@ def main() -> None:
         "--target-account",
         type=str,
         default="local",
-        help="Target account for folders: 'local' (default), 'imap' (first IMAP), or account ID",
+        help="Target account: 'local' (default) or IMAP server name (e.g., outlook.office365.com)",
     )
 
     # init - Initialize folder structure
@@ -1502,7 +1511,7 @@ def main() -> None:
         "--target-account",
         type=str,
         default="local",
-        help="Target account: 'local' (default), 'imap', or account ID",
+        help="Target account: 'local' (default) or IMAP server name (e.g., outlook.office365.com)",
     )
 
     args = parser.parse_args()

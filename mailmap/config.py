@@ -55,6 +55,7 @@ class ThunderbirdConfig:
     import_limit: int | float | None = None  # Max emails: int=count, float(0-1)=percentage
     init_sample_limit: int | float = 100  # Max emails: int=count, float(0-1)=percentage
     random_sample: bool = False  # Use random sampling instead of sequential
+    source_type: str | None = None  # Force source: 'thunderbird' or 'imap'
 
 
 @dataclass

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mailmap.config import Config, ImapConfig, WebSocketConfig
+from mailmap.config import Config, ImapConfig, ThunderbirdConfig, WebSocketConfig
 from mailmap.targets import (
     ImapTarget,
     WebSocketTarget,
@@ -104,13 +104,14 @@ class TestImapTarget:
 
 
 class TestSelectTarget:
-    def test_select_websocket_for_local(self):
+    def test_select_websocket_for_local(self, mock_thunderbird_profile):
         mock_ws = MagicMock()
         mock_ws.is_connected = True
 
         config = Config(
             imap=ImapConfig(host="imap.example.com"),
             websocket=WebSocketConfig(enabled=True),
+            thunderbird=ThunderbirdConfig(profile_path=str(mock_thunderbird_profile)),
         )
         target = select_target(config, mock_ws, "local")
         assert isinstance(target, WebSocketTarget)
@@ -123,51 +124,41 @@ class TestSelectTarget:
         with pytest.raises(ValueError, match="requires WebSocket connection"):
             select_target(config, None, "local")
 
-    def test_select_websocket_for_imap_when_connected(self):
+    def test_select_websocket_for_server_name(self, mock_thunderbird_profile):
+        """Test selecting target by server name resolves to account ID."""
         mock_ws = MagicMock()
         mock_ws.is_connected = True
 
         config = Config(
             imap=ImapConfig(host="imap.example.com"),
             websocket=WebSocketConfig(enabled=True),
+            thunderbird=ThunderbirdConfig(profile_path=str(mock_thunderbird_profile)),
         )
-        target = select_target(config, mock_ws, "imap")
+        # Should resolve server name to account ID
+        target = select_target(config, mock_ws, "imap.example.com")
         assert isinstance(target, WebSocketTarget)
 
-    def test_select_imap_for_imap_when_not_connected(self):
-        config = Config(
-            imap=ImapConfig(host="imap.example.com"),
-            websocket=WebSocketConfig(enabled=True),
-        )
-        target = select_target(config, None, "imap")
-        assert isinstance(target, ImapTarget)
-
-    def test_raises_for_imap_without_config(self):
-        config = Config(
-            imap=ImapConfig(host=""),  # Empty host
-            websocket=WebSocketConfig(enabled=True),
-        )
-        with pytest.raises(ValueError, match="No IMAP target available"):
-            select_target(config, None, "imap")
-
-    def test_select_websocket_for_account_id(self):
+    def test_raises_for_unknown_server(self, mock_thunderbird_profile):
+        """Test that unknown server names raise an error."""
         mock_ws = MagicMock()
         mock_ws.is_connected = True
 
         config = Config(
             imap=ImapConfig(host="imap.example.com"),
             websocket=WebSocketConfig(enabled=True),
+            thunderbird=ThunderbirdConfig(profile_path=str(mock_thunderbird_profile)),
         )
-        target = select_target(config, mock_ws, "account123")
-        assert isinstance(target, WebSocketTarget)
+        with pytest.raises(ValueError, match="not found in Thunderbird profile"):
+            select_target(config, mock_ws, "unknown.server.com")
 
-    def test_raises_for_account_id_without_websocket(self):
+    def test_raises_for_server_without_websocket(self):
+        """Test that server names require WebSocket connection."""
         config = Config(
             imap=ImapConfig(host="imap.example.com"),
             websocket=WebSocketConfig(enabled=True),
         )
         with pytest.raises(ValueError, match="requires WebSocket connection"):
-            select_target(config, None, "account123")
+            select_target(config, None, "outlook.office365.com")
 
 
 class TestEmailTargetProtocol:

@@ -336,6 +336,93 @@ def get_raw_email(mbox_path: str, message_id: str) -> bytes | None:
     return None
 
 
+def parse_prefs_js(profile_path: Path) -> dict[str, str]:
+    """Parse Thunderbird's prefs.js file into a dict of preferences.
+
+    Args:
+        profile_path: Path to the Thunderbird profile directory
+
+    Returns:
+        Dict of preference name -> value
+    """
+    prefs_path = profile_path / "prefs.js"
+    if not prefs_path.exists():
+        return {}
+
+    prefs = {}
+    import re
+
+    # Pattern: user_pref("key", value);
+    # Value can be string (quoted), number, or boolean
+    pref_pattern = re.compile(r'user_pref\("([^"]+)",\s*(.+)\);')
+
+    try:
+        with open(prefs_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                match = pref_pattern.match(line.strip())
+                if match:
+                    key = match.group(1)
+                    value = match.group(2).strip()
+                    # Remove quotes from string values
+                    if value.startswith('"') and value.endswith('"'):
+                        value = value[1:-1]
+                    prefs[key] = value
+    except Exception as e:
+        logger.warning(f"Failed to parse prefs.js: {e}")
+
+    return prefs
+
+
+def get_account_server_mapping(profile_path: Path) -> dict[str, str]:
+    """Get mapping of server hostnames to Thunderbird account IDs.
+
+    Args:
+        profile_path: Path to the Thunderbird profile directory
+
+    Returns:
+        Dict of server hostname -> account ID (e.g., {"outlook.office365.com": "account1"})
+    """
+    prefs = parse_prefs_js(profile_path)
+
+    # Build server ID -> hostname mapping
+    server_hostnames: dict[str, str] = {}
+    for key, value in prefs.items():
+        if key.startswith("mail.server.") and key.endswith(".hostname"):
+            # Extract server ID: mail.server.server2.hostname -> server2
+            parts = key.split(".")
+            if len(parts) >= 3:
+                server_id = parts[2]
+                server_hostnames[server_id] = value
+
+    # Build account ID -> server ID mapping
+    account_servers: dict[str, str] = {}
+    for key, value in prefs.items():
+        if key.startswith("mail.account.") and key.endswith(".server"):
+            # Extract account ID: mail.account.account1.server -> account1
+            parts = key.split(".")
+            if len(parts) >= 3:
+                account_id = parts[2]
+                account_servers[account_id] = value
+
+    # Combine: hostname -> account ID
+    hostname_to_account: dict[str, str] = {}
+    for account_id, server_id in account_servers.items():
+        if server_id in server_hostnames:
+            hostname = server_hostnames[server_id]
+            hostname_to_account[hostname] = account_id
+
+    # Also handle Local Folders (type = "none")
+    local_folders_server = prefs.get("mail.accountmanager.localfoldersserver")
+    if local_folders_server:
+        # Find the account that uses this server
+        for account_id, server_id in account_servers.items():
+            if server_id == local_folders_server:
+                hostname_to_account["local"] = account_id
+                break
+
+    return hostname_to_account
+
+
 class ThunderbirdReader:
     """Read emails from a Thunderbird profile's IMAP cache."""
 
@@ -349,12 +436,55 @@ class ThunderbirdReader:
         """
         self.profile_path = find_thunderbird_profile(profile_path)
         self.server_filter = server_filter
+        self._account_mapping: dict[str, str] | None = None
 
         if not self.profile_path:
             raise ValueError("Could not find Thunderbird profile")
 
         if not self.profile_path.exists():
             raise ValueError(f"Thunderbird profile not found: {self.profile_path}")
+
+    def get_account_mapping(self) -> dict[str, str]:
+        """Get mapping of server hostnames to Thunderbird account IDs.
+
+        Returns:
+            Dict of server hostname -> account ID
+            Includes "local" key for Local Folders account
+        """
+        if self._account_mapping is None:
+            assert self.profile_path is not None
+            self._account_mapping = get_account_server_mapping(self.profile_path)
+        return self._account_mapping
+
+    def resolve_server_to_account_id(self, server_name: str) -> str:
+        """Resolve a server hostname to a Thunderbird account ID.
+
+        Args:
+            server_name: Server hostname (e.g., "outlook.office365.com") or "local"
+
+        Returns:
+            Thunderbird account ID (e.g., "account1")
+
+        Raises:
+            ValueError: If server not found in profile
+        """
+        mapping = self.get_account_mapping()
+
+        if server_name in mapping:
+            return mapping[server_name]
+
+        # List available servers for error message
+        available = [s for s in mapping if s != "local"]
+        if available:
+            raise ValueError(
+                f"Server '{server_name}' not found in Thunderbird profile.\n"
+                f"Available servers: {', '.join(sorted(available))}"
+            )
+        else:
+            raise ValueError(
+                f"Server '{server_name}' not found in Thunderbird profile.\n"
+                "No IMAP accounts configured."
+            )
 
     def list_servers(self) -> list[str]:
         """List available IMAP servers in the profile."""

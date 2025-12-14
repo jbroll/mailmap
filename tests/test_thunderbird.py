@@ -8,7 +8,9 @@ from mailmap.thunderbird import (
     ThunderbirdEmail,
     ThunderbirdReader,
     find_imap_mail_dirs,
+    get_account_server_mapping,
     list_mbox_files,
+    parse_prefs_js,
     read_mbox,
 )
 
@@ -50,6 +52,24 @@ def mock_thunderbird_profile(temp_dir):
     # Create .msf files (index files that Thunderbird creates)
     (imap_mail / "INBOX.msf").touch()
     (imap_mail / "Sent.msf").touch()
+
+    # Create Local Folders directory
+    local_folders = profile / "Mail" / "Local Folders"
+    local_folders.mkdir(parents=True)
+
+    # Create prefs.js with account mappings
+    prefs_js = profile / "prefs.js"
+    prefs_js.write_text(f'''// Mozilla User Preferences
+user_pref("mail.account.account1.server", "server1");
+user_pref("mail.account.account2.server", "server2");
+user_pref("mail.accountmanager.accounts", "account1,account2");
+user_pref("mail.accountmanager.localfoldersserver", "server2");
+user_pref("mail.server.server1.directory", "{imap_mail}");
+user_pref("mail.server.server1.hostname", "imap.example.com");
+user_pref("mail.server.server1.type", "imap");
+user_pref("mail.server.server2.directory", "{local_folders}");
+user_pref("mail.server.server2.type", "none");
+''')
 
     return profile
 
@@ -303,3 +323,65 @@ class TestThunderbirdReader:
         assert "outlook.office365.com:INBOX" in folders
         assert "outlook.office365.com:Drafts" in folders
         assert len(folders) == 3
+
+    def test_resolve_server_to_account_id(self, mock_thunderbird_profile):
+        """Test resolving server hostname to account ID."""
+        reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
+        account_id = reader.resolve_server_to_account_id("imap.example.com")
+
+        assert account_id == "account1"
+
+    def test_resolve_server_to_account_id_local(self, mock_thunderbird_profile):
+        """Test resolving 'local' to Local Folders account ID."""
+        reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
+        account_id = reader.resolve_server_to_account_id("local")
+
+        assert account_id == "account2"
+
+    def test_resolve_server_to_account_id_not_found(self, mock_thunderbird_profile):
+        """Test that unknown server raises ValueError."""
+        reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
+        with pytest.raises(ValueError, match="not found in Thunderbird profile"):
+            reader.resolve_server_to_account_id("unknown.server.com")
+
+    def test_get_account_mapping(self, mock_thunderbird_profile):
+        """Test getting the server to account ID mapping."""
+        reader = ThunderbirdReader(profile_path=mock_thunderbird_profile)
+        mapping = reader.get_account_mapping()
+
+        assert "imap.example.com" in mapping
+        assert "local" in mapping
+        assert mapping["imap.example.com"] == "account1"
+        assert mapping["local"] == "account2"
+
+
+class TestParsePrefsJs:
+    def test_parse_prefs_js(self, mock_thunderbird_profile):
+        """Test parsing prefs.js into a dictionary."""
+        prefs = parse_prefs_js(mock_thunderbird_profile)
+
+        assert prefs["mail.account.account1.server"] == "server1"
+        assert prefs["mail.account.account2.server"] == "server2"
+        assert prefs["mail.server.server1.hostname"] == "imap.example.com"
+        assert prefs["mail.server.server1.type"] == "imap"
+
+    def test_parse_prefs_js_missing_file(self, temp_dir):
+        """Test parsing returns empty dict for missing prefs.js."""
+        prefs = parse_prefs_js(temp_dir)
+        assert prefs == {}
+
+
+class TestGetAccountServerMapping:
+    def test_get_mapping(self, mock_thunderbird_profile):
+        """Test getting server hostname to account ID mapping."""
+        mapping = get_account_server_mapping(mock_thunderbird_profile)
+
+        assert "imap.example.com" in mapping
+        assert "local" in mapping
+        assert mapping["imap.example.com"] == "account1"
+        assert mapping["local"] == "account2"
+
+    def test_get_mapping_no_prefs(self, temp_dir):
+        """Test mapping returns empty dict when no prefs.js exists."""
+        mapping = get_account_server_mapping(temp_dir)
+        assert mapping == {}

@@ -55,6 +55,24 @@ def mock_thunderbird_profile(temp_dir):
     (imap_mail / "INBOX.msf").touch()
     (imap_mail / "Sent.msf").touch()
 
+    # Create Local Folders directory
+    local_folders = profile / "Mail" / "Local Folders"
+    local_folders.mkdir(parents=True)
+
+    # Create prefs.js with account mappings
+    prefs_js = profile / "prefs.js"
+    prefs_js.write_text(f'''// Mozilla User Preferences
+user_pref("mail.account.account1.server", "server1");
+user_pref("mail.account.account2.server", "server2");
+user_pref("mail.accountmanager.accounts", "account1,account2");
+user_pref("mail.accountmanager.localfoldersserver", "server2");
+user_pref("mail.server.server1.directory", "{imap_mail}");
+user_pref("mail.server.server1.hostname", "imap.example.com");
+user_pref("mail.server.server1.type", "imap");
+user_pref("mail.server.server2.directory", "{local_folders}");
+user_pref("mail.server.server2.type", "none");
+''')
+
     return profile
 
 
