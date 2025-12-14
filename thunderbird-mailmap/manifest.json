@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Mailmap Connector",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Connects Thunderbird to mailmap for AI-powered email classification",
   "author": "mailmap",
   "browser_specific_settings": {
@@ -17,10 +17,14 @@
     "messagesUpdate",
     "messagesTags",
     "accountsRead",
-    "accountsFolders"
+    "accountsFolders",
+    "storage"
   ],
   "background": {
     "scripts": ["protocol.js", "background.js"]
+  },
+  "options_ui": {
+    "page": "options.html"
   },
   "icons": {
     "48": "icons/mailmap-48.png"

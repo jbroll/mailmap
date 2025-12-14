@@ -35,9 +35,13 @@ class Request:
     id: str
     action: str
     params: dict[str, Any]
+    token: str | None = None  # Auth token for extension to verify
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self))
+        d = {"id": self.id, "action": self.action, "params": self.params}
+        if self.token:
+            d["token"] = self.token
+        return json.dumps(d)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Request":
@@ -45,6 +49,7 @@ class Request:
             id=data["id"],
             action=data["action"],
             params=data.get("params", {}),
+            token=data.get("token"),
         )
 
 

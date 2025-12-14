@@ -12,6 +12,26 @@ class MailmapConnection {
     this.eventHandlers = new Map(); // event -> [handlers]
     this.connected = false;
     this.reconnectScheduled = false; // Prevent double scheduling
+    this.authToken = null; // Token for authenticating server requests
+    this.loadAuthToken();
+  }
+
+  async loadAuthToken() {
+    try {
+      const result = await browser.storage.local.get("authToken");
+      this.authToken = result.authToken || null;
+      console.log("[mailmap] Auth token loaded:", this.authToken ? "configured" : "not set");
+    } catch (e) {
+      console.error("[mailmap] Failed to load auth token:", e);
+    }
+
+    // Listen for token changes
+    browser.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && changes.authToken) {
+        this.authToken = changes.authToken.newValue || null;
+        console.log("[mailmap] Auth token updated:", this.authToken ? "configured" : "cleared");
+      }
+    });
   }
 
   connect() {
@@ -94,11 +114,20 @@ class MailmapConnection {
   }
 
   async handleRequest(request) {
-    const { id, action, params } = request;
+    const { id, action, params, token } = request;
     let result;
     let error = null;
 
     console.log(`[mailmap] <- ${action}`, params);
+
+    // Validate token if authentication is configured
+    if (this.authToken) {
+      if (!token || token !== this.authToken) {
+        console.warn(`[mailmap] Rejected ${action}: invalid or missing token`);
+        this.send({ id, ok: false, error: "Authentication failed: invalid token" });
+        return;
+      }
+    }
 
     try {
       result = await this.executeAction(action, params || {});

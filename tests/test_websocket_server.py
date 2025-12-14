@@ -30,6 +30,24 @@ class TestProtocol:
         assert req.action == "test"
         assert req.params == {"x": 1}
 
+    def test_request_with_token(self):
+        req = Request(id="123", action="ping", params={}, token="secret123")
+        data = json.loads(req.to_json())
+        assert data["token"] == "secret123"
+
+    def test_request_without_token(self):
+        req = Request(id="123", action="ping", params={})
+        data = json.loads(req.to_json())
+        assert "token" not in data
+
+    def test_request_from_dict_with_token(self):
+        req = Request.from_dict({"id": "123", "action": "test", "params": {}, "token": "abc"})
+        assert req.token == "abc"
+
+    def test_request_from_dict_without_token(self):
+        req = Request.from_dict({"id": "123", "action": "test", "params": {}})
+        assert req.token is None
+
     def test_response_success(self):
         resp = Response.success("123", {"result": "ok"})
         assert resp.id == "123"

@@ -158,7 +158,12 @@ class WebSocketServer:
             return None
 
         request_id = str(uuid.uuid4())
-        request = Request(id=request_id, action=action.value, params=params)
+        request = Request(
+            id=request_id,
+            action=action.value,
+            params=params,
+            token=self.config.auth_token or None,
+        )
 
         future: asyncio.Future[Response] = asyncio.get_event_loop().create_future()
         self._pending_requests[request_id] = future
