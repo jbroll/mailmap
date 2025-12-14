@@ -183,6 +183,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Process N emails concurrently (default: 1)",
     )
+    classify_parser.add_argument(
+        "--rate-limit",
+        type=float,
+        default=1.0,
+        metavar="SECS",
+        help="Minimum seconds between transfer-only operations (default: 1.0)",
+    )
     add_target_args(classify_parser)
 
     # init - Initialize folder structure
@@ -406,9 +413,11 @@ def _run_command(args, config: Config, db: Database) -> None:
         websocket_port = getattr(args, "websocket", None)
         force = getattr(args, "force", False)
         concurrency = getattr(args, "concurrency", 1)
+        rate_limit = getattr(args, "rate_limit", 1.0)
         asyncio.run(run_bulk_classify(
             config, db, copy=copy_mode, move=move_mode, target_account=target_account,
-            websocket_port=websocket_port, force=force, concurrency=concurrency
+            websocket_port=websocket_port, force=force, concurrency=concurrency,
+            rate_limit=rate_limit
         ))
     elif args.command == "upload":
         dry_run = getattr(args, "dry_run", False)
