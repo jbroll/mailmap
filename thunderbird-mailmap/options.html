@@ -90,14 +90,14 @@
   <h1>Mailmap Connector Settings</h1>
 
   <div class="warning">
-    <strong>Security:</strong> Set a token to authenticate commands from the mailmap daemon.
-    Use the same token in your <code>MAILMAP_WS_TOKEN</code> environment variable.
+    <strong>Required:</strong> A token must be configured before the extension will accept commands.
+    Use the same token in your <code>MAILMAP_WS_TOKEN</code> environment variable when running mailmap.
   </div>
 
   <div class="field">
     <label for="token">Authentication Token</label>
     <div class="description">
-      Only execute commands that include this token. Leave empty to allow all local connections (not recommended).
+      Required. Only execute commands that include this token. Commands are rejected until a token is set.
     </div>
     <input type="text" id="token" placeholder="Enter or generate a token">
     <div class="button-row">

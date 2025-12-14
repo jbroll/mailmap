@@ -40,7 +40,11 @@ async function saveToken() {
   const token = tokenInput.value.trim();
   try {
     await browser.storage.local.set({ authToken: token });
-    showStatus(token ? "Token saved! Remember to set MAILMAP_WS_TOKEN to the same value." : "Token cleared. All local connections will be accepted.");
+    if (token) {
+      showStatus("Token saved! Set MAILMAP_WS_TOKEN to the same value when running mailmap.");
+    } else {
+      showStatus("Token cleared. All commands will be rejected until a token is set.", true);
+    }
   } catch (e) {
     console.error("Failed to save token:", e);
     showStatus("Failed to save token: " + e.message, true);

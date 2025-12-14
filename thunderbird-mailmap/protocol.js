@@ -120,13 +120,16 @@ class MailmapConnection {
 
     console.log(`[mailmap] <- ${action}`, params);
 
-    // Validate token if authentication is configured
-    if (this.authToken) {
-      if (!token || token !== this.authToken) {
-        console.warn(`[mailmap] Rejected ${action}: invalid or missing token`);
-        this.send({ id, ok: false, error: "Authentication failed: invalid token" });
-        return;
-      }
+    // Validate token - reject if no token configured (secure by default)
+    if (!this.authToken) {
+      console.warn(`[mailmap] Rejected ${action}: no auth token configured in extension`);
+      this.send({ id, ok: false, error: "Authentication failed: extension has no token configured" });
+      return;
+    }
+    if (!token || token !== this.authToken) {
+      console.warn(`[mailmap] Rejected ${action}: invalid or missing token`);
+      this.send({ id, ok: false, error: "Authentication failed: invalid token" });
+      return;
     }
 
     try {
