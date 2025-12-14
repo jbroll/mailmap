@@ -122,6 +122,22 @@ class ImapMailbox:
             uid=uid,
         )
 
+    def fetch_raw_email(self, uid: int, folder: str) -> bytes | None:
+        """Fetch raw email bytes by UID.
+
+        Args:
+            uid: The message UID
+            folder: The folder containing the message
+
+        Returns:
+            Raw RFC822 email bytes, or None if not found
+        """
+        self.select_folder(folder)
+        messages = self.client.fetch([uid], ["RFC822"])
+        if uid not in messages:
+            return None
+        return messages[uid][b"RFC822"]
+
     def fetch_recent_uids(self, folder: str, limit: int = 50) -> list[int]:
         """Fetch UIDs of recent messages in a folder."""
         self.select_folder(folder)

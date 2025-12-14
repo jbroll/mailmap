@@ -328,3 +328,25 @@ class TestImapMailboxOperations:
         msg = mailbox.fetch_email(999, "INBOX")
 
         assert msg is None
+
+    def test_fetch_raw_email(self, imap_config, mock_imap_client):
+        raw_email = b"From: sender@example.com\r\nSubject: Test Email\r\n\r\nBody"
+        mock_imap_client.fetch.return_value = {
+            123: {b"RFC822": raw_email}
+        }
+
+        mailbox = ImapMailbox(imap_config)
+        mailbox.connect()
+        result = mailbox.fetch_raw_email(123, "INBOX")
+
+        assert result == raw_email
+        mock_imap_client.select_folder.assert_called_with("INBOX")
+
+    def test_fetch_raw_email_not_found(self, imap_config, mock_imap_client):
+        mock_imap_client.fetch.return_value = {}
+
+        mailbox = ImapMailbox(imap_config)
+        mailbox.connect()
+        result = mailbox.fetch_raw_email(999, "INBOX")
+
+        assert result is None

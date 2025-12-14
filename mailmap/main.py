@@ -1188,8 +1188,16 @@ def upload_to_imap(
                         skipped += 1
                         continue
 
-                    # Get raw email from mbox
-                    raw_email = get_raw_email(email_record.mbox_path, email_record.message_id)
+                    # Get raw email - check if IMAP source (numeric UID) or Thunderbird (file path)
+                    if email_record.mbox_path.isdigit():
+                        # IMAP source: mbox_path is UID, folder_id is source folder
+                        uid = int(email_record.mbox_path)
+                        source_folder = email_record.folder_id
+                        raw_email = mailbox.fetch_raw_email(uid, source_folder)
+                    else:
+                        # Thunderbird source: mbox_path is file path
+                        raw_email = get_raw_email(email_record.mbox_path, email_record.message_id)
+
                     if not raw_email:
                         logger.warning(f"Could not retrieve {email_record.message_id} from {email_record.mbox_path}")
                         errors += 1
@@ -1197,10 +1205,10 @@ def upload_to_imap(
 
                     # Upload to IMAP
                     try:
-                        uid = mailbox.append_email(folder, raw_email, flags=(r"\Seen",))
+                        new_uid = mailbox.append_email(folder, raw_email, flags=(r"\Seen",))
                         uploaded += 1
-                        if uid:
-                            logger.debug(f"Uploaded {email_record.message_id} to {folder} (UID: {uid})")
+                        if new_uid:
+                            logger.debug(f"Uploaded {email_record.message_id} to {folder} (UID: {new_uid})")
                         else:
                             logger.debug(f"Uploaded {email_record.message_id} to {folder}")
                     except Exception as e:
@@ -1214,6 +1222,183 @@ def upload_to_imap(
 
     finally:
         db.close()
+
+
+# =============================================================================
+# IMAP/Source Management Commands
+# =============================================================================
+
+
+async def list_folders_cmd(config: Config, source_type: str = "imap") -> None:
+    """List folders with email counts.
+
+    Args:
+        config: Application configuration
+        source_type: 'imap' or 'thunderbird'
+    """
+    from .sources import select_source
+
+    source = select_source(config, source_type)
+
+    async with source:
+        folders = await source.list_folders()
+
+        print(f"{'Folder':<40} {'Count':>8}")
+        print("-" * 50)
+
+        for folder in sorted(folders):
+            # Count emails in folder
+            count = 0
+            async for _ in source.read_emails(folder, limit=None):
+                count += 1
+            print(f"{folder:<40} {count:>8}")
+
+
+async def list_emails_cmd(
+    config: Config,
+    folder: str,
+    source_type: str = "imap",
+    limit: int = 50,
+) -> None:
+    """List emails in a folder.
+
+    Args:
+        config: Application configuration
+        folder: Folder name
+        source_type: 'imap' or 'thunderbird'
+        limit: Maximum emails to list
+    """
+    from .sources import select_source
+
+    source = select_source(config, source_type)
+
+    async with source:
+        print(f"{'UID':<8} {'From':<30} {'Subject':<50}")
+        print("-" * 90)
+
+        count = 0
+        async for email in source.read_emails(folder, limit=limit):
+            uid = email.source_ref if email.source_ref else "?"
+            from_addr = (email.from_addr or "")[:28]
+            subject = (email.subject or "")[:48]
+            print(f"{uid:<8} {from_addr:<30} {subject:<50}")
+            count += 1
+
+        print(f"\nTotal: {count} emails")
+
+
+async def read_email_cmd(
+    config: Config,
+    folder: str,
+    uid: int,
+) -> None:
+    """Read and display an email.
+
+    Args:
+        config: Application configuration
+        folder: Folder name
+        uid: Email UID
+    """
+    mailbox = ImapMailbox(config.imap)
+    mailbox.connect()
+
+    try:
+        email = mailbox.fetch_email(uid, folder)
+        if not email:
+            logger.error(f"Email UID {uid} not found in {folder}")
+            return
+
+        print(f"From: {email.from_addr}")
+        print(f"Subject: {email.subject}")
+        print(f"Message-ID: {email.message_id}")
+        print(f"Folder: {email.folder}")
+        print(f"UID: {email.uid}")
+        print("-" * 60)
+        print(email.body_text or "(no body)")
+    finally:
+        mailbox.disconnect()
+
+
+def create_folder_cmd(config: Config, folder: str) -> None:
+    """Create a folder on IMAP server.
+
+    Args:
+        config: Application configuration
+        folder: Folder name to create
+    """
+    mailbox = ImapMailbox(config.imap)
+    mailbox.connect()
+
+    try:
+        if mailbox.folder_exists(folder):
+            logger.info(f"Folder already exists: {folder}")
+        else:
+            mailbox.create_folder(folder)
+            logger.info(f"Created folder: {folder}")
+    finally:
+        mailbox.disconnect()
+
+
+def delete_folder_cmd(config: Config, folder: str) -> None:
+    """Delete a folder from IMAP server.
+
+    Args:
+        config: Application configuration
+        folder: Folder name to delete
+    """
+    mailbox = ImapMailbox(config.imap)
+    mailbox.connect()
+
+    try:
+        if not mailbox.folder_exists(folder):
+            logger.error(f"Folder does not exist: {folder}")
+            return
+
+        mailbox.client.delete_folder(folder)
+        logger.info(f"Deleted folder: {folder}")
+    finally:
+        mailbox.disconnect()
+
+
+def move_email_cmd(config: Config, folder: str, uid: int, dest: str) -> None:
+    """Move an email to another folder.
+
+    Args:
+        config: Application configuration
+        folder: Source folder
+        uid: Email UID
+        dest: Destination folder
+    """
+    mailbox = ImapMailbox(config.imap)
+    mailbox.connect()
+
+    try:
+        mailbox.ensure_folder(dest)
+        mailbox.move_email(uid, folder, dest)
+        logger.info(f"Moved UID {uid} from {folder} to {dest}")
+    finally:
+        mailbox.disconnect()
+
+
+def copy_email_cmd(config: Config, folder: str, uid: int, dest: str) -> None:
+    """Copy an email to another folder.
+
+    Args:
+        config: Application configuration
+        folder: Source folder
+        uid: Email UID
+        dest: Destination folder
+    """
+    mailbox = ImapMailbox(config.imap)
+    mailbox.connect()
+
+    try:
+        mailbox.ensure_folder(dest)
+        mailbox.select_folder(folder)
+        mailbox.client.copy([uid], dest)
+        logger.info(f"Copied UID {uid} from {folder} to {dest}")
+    finally:
+        mailbox.disconnect()
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -1382,6 +1567,63 @@ def main() -> None:
         help="Target account: 'local' (default) or IMAP server name (e.g., outlook.office365.com)",
     )
 
+    # folders - List folders with counts
+    folders_parser = subparsers.add_parser("folders", help="List folders with email counts")
+    add_common_args(folders_parser)
+    folders_parser.add_argument(
+        "--source-type",
+        choices=["imap", "thunderbird"],
+        default="imap",
+        help="Email source: 'imap' (default) or 'thunderbird'",
+    )
+
+    # emails - List emails in a folder
+    emails_parser = subparsers.add_parser("emails", help="List emails in a folder")
+    add_common_args(emails_parser)
+    emails_parser.add_argument("folder", help="Folder name")
+    emails_parser.add_argument(
+        "--source-type",
+        choices=["imap", "thunderbird"],
+        default="imap",
+        help="Email source: 'imap' (default) or 'thunderbird'",
+    )
+    emails_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum emails to list (default: 50)",
+    )
+
+    # read - Read/view an email
+    read_parser = subparsers.add_parser("read", help="Read and display an email")
+    add_common_args(read_parser)
+    read_parser.add_argument("folder", help="Folder name")
+    read_parser.add_argument("uid", type=int, help="Email UID")
+
+    # create-folder - Create a folder
+    create_folder_parser = subparsers.add_parser("create-folder", help="Create a folder on IMAP server")
+    add_common_args(create_folder_parser)
+    create_folder_parser.add_argument("folder", help="Folder name to create")
+
+    # delete-folder - Delete a folder
+    delete_folder_parser = subparsers.add_parser("delete-folder", help="Delete a folder from IMAP server")
+    add_common_args(delete_folder_parser)
+    delete_folder_parser.add_argument("folder", help="Folder name to delete")
+
+    # move - Move an email
+    move_parser = subparsers.add_parser("move", help="Move an email to another folder")
+    add_common_args(move_parser)
+    move_parser.add_argument("folder", help="Source folder")
+    move_parser.add_argument("uid", type=int, help="Email UID")
+    move_parser.add_argument("dest", help="Destination folder")
+
+    # copy - Copy an email
+    copy_parser = subparsers.add_parser("copy", help="Copy an email to another folder")
+    add_common_args(copy_parser)
+    copy_parser.add_argument("folder", help="Source folder")
+    copy_parser.add_argument("uid", type=int, help="Email UID")
+    copy_parser.add_argument("dest", help="Destination folder")
+
     args = parser.parse_args()
 
     # Default to daemon if no command specified
@@ -1430,6 +1672,24 @@ def main() -> None:
         asyncio.run(cleanup_thunderbird_folders(config, db, target_account=target_account))
     elif args.command == "daemon":
         asyncio.run(run_daemon(config, db))
+    elif args.command == "folders":
+        source_type = getattr(args, "source_type", "imap")
+        asyncio.run(list_folders_cmd(config, source_type))
+    elif args.command == "emails":
+        folder = args.folder
+        source_type = getattr(args, "source_type", "imap")
+        limit = getattr(args, "limit", 50)
+        asyncio.run(list_emails_cmd(config, folder, source_type, limit))
+    elif args.command == "read":
+        asyncio.run(read_email_cmd(config, args.folder, args.uid))
+    elif args.command == "create-folder":
+        create_folder_cmd(config, args.folder)
+    elif args.command == "delete-folder":
+        delete_folder_cmd(config, args.folder)
+    elif args.command == "move":
+        move_email_cmd(config, args.folder, args.uid, args.dest)
+    elif args.command == "copy":
+        copy_email_cmd(config, args.folder, args.uid, args.dest)
 
 
 if __name__ == "__main__":
