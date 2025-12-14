@@ -43,8 +43,12 @@ class EmailProcessor:
             self._mailbox = None
         return self._get_mailbox()
 
-    def _move_to_folder(self, message: EmailMessage, folder: str) -> None:
-        """Move an email to the destination folder with retry on failure."""
+    def _move_to_folder(self, message: EmailMessage, folder: str) -> bool:
+        """Move an email to the destination folder with retry on failure.
+
+        Returns:
+            True if move was successful, False otherwise.
+        """
         last_error = None
 
         for attempt in range(self.MAX_MOVE_RETRIES):
@@ -53,7 +57,7 @@ class EmailProcessor:
                 mailbox.ensure_folder(folder)
                 mailbox.move_email(message.uid, message.folder, folder)
                 logger.info(f"Moved to '{folder}'")
-                return
+                return True
             except Exception as e:
                 last_error = e
                 logger.warning(f"Move failed (attempt {attempt + 1}/{self.MAX_MOVE_RETRIES}): {e}")
@@ -64,6 +68,7 @@ class EmailProcessor:
                     self._reconnect_mailbox()
 
         logger.error(f"Failed to move message after {self.MAX_MOVE_RETRIES} attempts: {last_error}")
+        return False
 
     def enqueue(self, message: EmailMessage) -> None:
         """Add a message to the processing queue."""
@@ -116,8 +121,8 @@ class EmailProcessor:
         )
 
         # Move to destination folder if enabled
-        if self.move:
-            self._move_to_folder(message, classification.predicted_folder)
+        if self.move and self._move_to_folder(message, classification.predicted_folder):
+            self.db.mark_as_transferred(message.message_id)
 
 
 async def run_listener(config: Config, db: Database, *, move: bool = False) -> None:

@@ -23,6 +23,7 @@ class Email:
     is_spam: bool = False
     spam_reason: str | None = None  # Which rule matched
     processed_at: datetime | None = None
+    transferred_at: datetime | None = None  # When email was copied/moved to target
 
 
 SCHEMA = """
@@ -94,7 +95,7 @@ class Database:
         """Initialize database schema, including migrations."""
         self.conn.executescript(SCHEMA)
 
-        # Migration: add is_spam and spam_reason columns if they don't exist
+        # Migration: add columns if they don't exist
         cursor = self.conn.execute("PRAGMA table_info(emails)")
         columns = {row["name"] for row in cursor.fetchall()}
 
@@ -102,6 +103,8 @@ class Database:
             self.conn.execute("ALTER TABLE emails ADD COLUMN is_spam INTEGER DEFAULT 0")
         if "spam_reason" not in columns:
             self.conn.execute("ALTER TABLE emails ADD COLUMN spam_reason TEXT")
+        if "transferred_at" not in columns:
+            self.conn.execute("ALTER TABLE emails ADD COLUMN transferred_at TIMESTAMP")
 
         self.conn.commit()
 
@@ -140,6 +143,11 @@ class Database:
 
     def _row_to_email(self, row: sqlite3.Row) -> Email:
         """Convert a database row to an Email object."""
+        # Handle transferred_at which may not exist in older databases
+        transferred_at = None
+        if "transferred_at" in row:
+            transferred_at = row["transferred_at"]
+
         return Email(
             message_id=row["message_id"],
             folder_id=row["folder_id"],
@@ -151,6 +159,7 @@ class Database:
             is_spam=bool(row["is_spam"]) if row["is_spam"] is not None else False,
             spam_reason=row["spam_reason"],
             processed_at=row["processed_at"],
+            transferred_at=transferred_at,
         )
 
     def update_classification(
@@ -176,6 +185,18 @@ class Database:
             WHERE message_id = ?
             """,
             (reason, message_id),
+        )
+        self.conn.commit()
+
+    def mark_as_transferred(self, message_id: str) -> None:
+        """Mark an email as successfully transferred to target folder."""
+        self.conn.execute(
+            """
+            UPDATE emails
+            SET transferred_at = ?
+            WHERE message_id = ?
+            """,
+            (datetime.now(), message_id),
         )
         self.conn.commit()
 
@@ -262,6 +283,25 @@ class Database:
             "SELECT COUNT(*) as count FROM emails WHERE classification IS NOT NULL AND is_spam = 0"
         ).fetchone()
         return row["count"] if row else 0
+
+    def get_transferred_count(self) -> int:
+        """Get count of emails successfully transferred to target folder."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) as count FROM emails WHERE transferred_at IS NOT NULL"
+        ).fetchone()
+        return row["count"] if row else 0
+
+    def get_untransferred_emails(self) -> list[Email]:
+        """Get classified emails that haven't been transferred yet."""
+        rows = self.conn.execute(
+            """
+            SELECT * FROM emails
+            WHERE classification IS NOT NULL
+            AND transferred_at IS NULL
+            AND is_spam = 0
+            """
+        ).fetchall()
+        return [self._row_to_email(row) for row in rows]
 
     def get_recent_classifications(self, limit: int = 50) -> list[Email]:
         """Get recently classified emails."""

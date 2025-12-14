@@ -135,6 +135,7 @@ async def _process_single_email(
 
                 if success:
                     await stats.increment(copied=1)
+                    db.mark_as_transferred(email.message_id)
                     conf_str = (
                         f" ({result.confidence:.0%})"
                         if target_folder != "Unknown"
@@ -227,7 +228,6 @@ async def bulk_classify(
     spam_rules = parse_rules(config.spam.rules) if config.spam.enabled else []
 
     stats = ProcessingStats()
-    action_past = "moved" if move else "copied"
     start_time = time.time()
     semaphore = asyncio.Semaphore(concurrency)
 
@@ -369,7 +369,7 @@ async def bulk_classify(
     )
     logger.info(f"Elapsed time: {elapsed:.1f}s, rate: {rate:.2f} emails/sec")
     if target:
-        logger.info(f"Target actions: {stats.copied} {action_past}, {stats.failed} failed")
+        logger.info(f"Target actions: {stats.copied} transferred, {stats.failed} failed")
 
     return classifications
 

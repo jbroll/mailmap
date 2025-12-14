@@ -305,3 +305,112 @@ class TestEmailOperations:
         assert test_db.get_total_count() == 3
         assert test_db.get_classified_count() == 1  # Excludes spam
         assert test_db.get_spam_count() == 1
+
+    def test_mark_as_transferred(self, test_db):
+        email = Email(
+            message_id="<test@example.com>",
+            folder_id="INBOX",
+            subject="Test",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Work",
+            confidence=0.9,
+        )
+        test_db.insert_email(email)
+
+        # Initially not transferred
+        retrieved = test_db.get_email("<test@example.com>")
+        assert retrieved.transferred_at is None
+
+        # Mark as transferred
+        test_db.mark_as_transferred("<test@example.com>")
+
+        retrieved = test_db.get_email("<test@example.com>")
+        assert retrieved.transferred_at is not None
+
+    def test_get_transferred_count(self, test_db):
+        # Insert some emails
+        for i in range(3):
+            email = Email(
+                message_id=f"<test{i}@example.com>",
+                folder_id="INBOX",
+                subject=f"Test {i}",
+                from_addr="test@test.com",
+                mbox_path="/path/to/mbox",
+                classification="Work",
+            )
+            test_db.insert_email(email)
+
+        # Initially none transferred
+        assert test_db.get_transferred_count() == 0
+
+        # Mark two as transferred
+        test_db.mark_as_transferred("<test0@example.com>")
+        test_db.mark_as_transferred("<test1@example.com>")
+
+        assert test_db.get_transferred_count() == 2
+
+    def test_get_untransferred_emails(self, test_db):
+        # Insert classified emails
+        email1 = Email(
+            message_id="<transferred@example.com>",
+            folder_id="INBOX",
+            subject="Transferred",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Work",
+        )
+        email2 = Email(
+            message_id="<untransferred@example.com>",
+            folder_id="INBOX",
+            subject="Untransferred",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Personal",
+        )
+        email3 = Email(
+            message_id="<unclassified@example.com>",
+            folder_id="INBOX",
+            subject="Unclassified",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+        )
+        test_db.insert_email(email1)
+        test_db.insert_email(email2)
+        test_db.insert_email(email3)
+
+        # Mark one as transferred
+        test_db.mark_as_transferred("<transferred@example.com>")
+
+        # Get untransferred - should only return classified but not transferred
+        untransferred = test_db.get_untransferred_emails()
+        assert len(untransferred) == 1
+        assert untransferred[0].message_id == "<untransferred@example.com>"
+
+    def test_get_untransferred_excludes_spam(self, test_db):
+        # Insert spam email that's classified but not transferred
+        spam_email = Email(
+            message_id="<spam@example.com>",
+            folder_id="INBOX",
+            subject="Spam",
+            from_addr="spammer@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Spam",
+            is_spam=True,
+        )
+        # Insert regular classified but untransferred email
+        regular_email = Email(
+            message_id="<regular@example.com>",
+            folder_id="INBOX",
+            subject="Regular",
+            from_addr="test@test.com",
+            mbox_path="/path/to/mbox",
+            classification="Work",
+        )
+        test_db.insert_email(spam_email)
+        test_db.insert_email(regular_email)
+
+        # Only regular email should be returned
+        untransferred = test_db.get_untransferred_emails()
+        assert len(untransferred) == 1
+        assert untransferred[0].message_id == "<regular@example.com>"
