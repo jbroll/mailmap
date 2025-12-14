@@ -18,6 +18,10 @@ logger = logging.getLogger("mailmap")
 class EmailProcessor:
     """Process incoming emails through the classification pipeline."""
 
+    # Reconnection settings for move operations
+    MAX_MOVE_RETRIES = 3
+    RETRY_DELAY = 5  # seconds
+
     def __init__(self, config: Config, db: Database, *, move: bool = False):
         self.config = config
         self.db = db
@@ -32,12 +36,34 @@ class EmailProcessor:
             self._mailbox.connect()
         return self._mailbox
 
+    def _reconnect_mailbox(self) -> ImapMailbox:
+        """Force reconnection to IMAP server."""
+        if self._mailbox is not None:
+            self._mailbox.disconnect()
+            self._mailbox = None
+        return self._get_mailbox()
+
     def _move_to_folder(self, message: EmailMessage, folder: str) -> None:
-        """Move an email to the destination folder."""
-        mailbox = self._get_mailbox()
-        mailbox.ensure_folder(folder)
-        mailbox.move_email(message.uid, message.folder, folder)
-        logger.info(f"Moved to '{folder}'")
+        """Move an email to the destination folder with retry on failure."""
+        last_error = None
+
+        for attempt in range(self.MAX_MOVE_RETRIES):
+            try:
+                mailbox = self._get_mailbox()
+                mailbox.ensure_folder(folder)
+                mailbox.move_email(message.uid, message.folder, folder)
+                logger.info(f"Moved to '{folder}'")
+                return
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Move failed (attempt {attempt + 1}/{self.MAX_MOVE_RETRIES}): {e}")
+                if attempt < self.MAX_MOVE_RETRIES - 1:
+                    logger.info(f"Reconnecting and retrying in {self.RETRY_DELAY}s...")
+                    import time
+                    time.sleep(self.RETRY_DELAY)
+                    self._reconnect_mailbox()
+
+        logger.error(f"Failed to move message after {self.MAX_MOVE_RETRIES} attempts: {last_error}")
 
     def enqueue(self, message: EmailMessage) -> None:
         """Add a message to the processing queue."""

@@ -233,21 +233,64 @@ class ImapMailbox:
 
 
 class ImapListener:
-    """Async IMAP listener that monitors folders for new emails."""
+    """Async IMAP listener that monitors folders for new emails.
+
+    Includes automatic reconnection with exponential backoff on connection failures.
+    """
+
+    # Reconnection settings
+    INITIAL_RETRY_DELAY = 5  # seconds
+    MAX_RETRY_DELAY = 300  # 5 minutes max
+    BACKOFF_MULTIPLIER = 2
 
     def __init__(self, config: ImapConfig):
         self.config = config
         self._running = False
         self._last_uids: dict[str, int] = {}
 
+    def _calculate_backoff(self, attempt: int) -> float:
+        """Calculate exponential backoff delay."""
+        delay = self.INITIAL_RETRY_DELAY * (self.BACKOFF_MULTIPLIER ** attempt)
+        return min(delay, self.MAX_RETRY_DELAY)
+
     async def watch_folder_idle(
         self,
         folder: str,
         callback: Callable[[EmailMessage], None],
     ) -> None:
-        """Watch a folder using IDLE for real-time notifications."""
-        mailbox = ImapMailbox(self.config)
+        """Watch a folder using IDLE for real-time notifications.
 
+        Automatically reconnects on connection failures with exponential backoff.
+        """
+        attempt = 0
+
+        while self._running:
+            mailbox = ImapMailbox(self.config)
+            try:
+                await self._run_idle_loop(mailbox, folder, callback)
+                # If we exit cleanly (self._running = False), break out
+                break
+            except Exception as e:
+                mailbox.disconnect()
+                if not self._running:
+                    break
+
+                delay = self._calculate_backoff(attempt)
+                logger.error(f"IMAP connection error on {folder}: {e}")
+                logger.info(f"Reconnecting in {delay:.0f}s (attempt {attempt + 1})...")
+                await asyncio.sleep(delay)
+                attempt += 1
+            else:
+                # Reset attempt counter on successful iteration
+                attempt = 0
+
+    async def _run_idle_loop(
+        self,
+        mailbox: ImapMailbox,
+        folder: str,
+        callback: Callable[[EmailMessage], None],
+    ) -> None:
+        """Run the IDLE monitoring loop (blocking, runs in executor)."""
         def run_idle():
             mailbox.connect()
             logger.info(f"Connected to {self.config.host}, watching {folder} with IDLE")
@@ -280,9 +323,33 @@ class ImapListener:
         callback: Callable[[EmailMessage], None],
         interval: int = 300,
     ) -> None:
-        """Poll a folder periodically for new messages."""
-        mailbox = ImapMailbox(self.config)
+        """Poll a folder periodically for new messages.
+
+        Automatically reconnects on connection failures with exponential backoff.
+        """
         logger.info(f"Polling {folder} every {interval}s")
+        attempt = 0
+
+        while self._running:
+            try:
+                messages = await self._check_folder_once(folder)
+                for msg in messages:
+                    callback(msg)
+                attempt = 0  # Reset on success
+                await asyncio.sleep(interval)
+            except Exception as e:
+                if not self._running:
+                    break
+
+                delay = self._calculate_backoff(attempt)
+                logger.error(f"IMAP poll error on {folder}: {e}")
+                logger.info(f"Retrying in {delay:.0f}s (attempt {attempt + 1})...")
+                await asyncio.sleep(delay)
+                attempt += 1
+
+    async def _check_folder_once(self, folder: str) -> list[EmailMessage]:
+        """Check a folder for new messages (single poll)."""
+        mailbox = ImapMailbox(self.config)
 
         def check_folder():
             mailbox.connect()
@@ -304,11 +371,7 @@ class ImapListener:
                 mailbox.disconnect()
 
         loop = asyncio.get_event_loop()
-        while self._running:
-            messages = await loop.run_in_executor(None, check_folder)
-            for msg in messages:
-                callback(msg)
-            await asyncio.sleep(interval)
+        return await loop.run_in_executor(None, check_folder)
 
     async def start(
         self,
