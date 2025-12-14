@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import email
 import email.message
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from email.header import decode_header
@@ -11,6 +12,8 @@ from email.header import decode_header
 from imapclient import IMAPClient
 
 from .config import ImapConfig
+
+logger = logging.getLogger("mailmap")
 
 
 @dataclass
@@ -245,9 +248,11 @@ class ImapListener:
 
         def run_idle():
             mailbox.connect()
+            logger.info(f"Connected to {self.config.host}, watching {folder} with IDLE")
             try:
                 uids = mailbox.fetch_recent_uids(folder, limit=1)
                 self._last_uids[folder] = uids[-1] if uids else 0
+                logger.info(f"IDLE started on {folder} (last UID: {self._last_uids[folder]})")
 
                 while self._running:
                     responses = mailbox.idle_check(folder, timeout=30)
@@ -275,6 +280,7 @@ class ImapListener:
     ) -> None:
         """Poll a folder periodically for new messages."""
         mailbox = ImapMailbox(self.config)
+        logger.info(f"Polling {folder} every {interval}s")
 
         def check_folder():
             mailbox.connect()
@@ -306,24 +312,16 @@ class ImapListener:
         self,
         callback: Callable[[EmailMessage], None],
     ) -> None:
-        """Start monitoring all configured folders."""
+        """Start monitoring configured idle_folders only."""
         self._running = True
         tasks = []
+
+        logger.info(f"Connecting to IMAP server {self.config.host}:{self.config.port}")
 
         for folder in self.config.idle_folders:
             tasks.append(self.watch_folder_idle(folder, callback))
 
-        mailbox = ImapMailbox(self.config)
-        mailbox.connect()
-        all_folders = mailbox.list_folders()
-        mailbox.disconnect()
-
-        poll_folders = [f for f in all_folders if f not in self.config.idle_folders]
-        for folder in poll_folders:
-            tasks.append(
-                self.poll_folder(folder, callback, self.config.poll_interval_seconds)
-            )
-
+        logger.info(f"Monitoring {len(self.config.idle_folders)} folders with IDLE: {', '.join(self.config.idle_folders)}")
         await asyncio.gather(*tasks)
 
     def stop(self) -> None:
