@@ -64,17 +64,56 @@ skip_folders = ["Junk", "Spam", "Trash"]
 
 ### Categories File (categories.txt)
 
-Categories define the destination folders and their descriptions for classification:
+Categories define the destination folders and their descriptions for classification. The LLM uses these descriptions to decide where each email belongs.
 
+**Format:**
 ```
-Financial: Banking, investments, and brokerage communications. Account
-statements, trade confirmations, and tax documents.
+CategoryName: Description text that can span
+multiple lines until a blank line.
 
-Receipts: Purchase receipts, invoices, and payment confirmations.
+AnotherCategory: Another description.
 
-Orders: Order confirmations and shipping notifications.
+# Comments start with #
+```
+
+**Rules:**
+- Category names: no spaces, alphanumeric + underscore
+- Descriptions can span multiple lines (until blank line)
+- Lines starting with `#` are comments
+- Blank lines separate categories
+
+**Writing Effective Descriptions:**
+
+Use a **discriminative approach** - focus on what makes each category unique rather than listing everything it contains. Describe:
+- WHO sends these emails (type of sender)
+- WHAT the primary intent is
+- What explicitly does NOT belong (to avoid confusion)
+
+**Example:**
+```
+Financial: Communications FROM financial institutions (banks, brokerages,
+credit unions) ABOUT your accounts, statements, or investments. The sender
+must be a company whose primary business is managing money. NOT payment
+receipts from regular companies - those go to Receipts.
+
+Receipts: Payment confirmations and invoices FROM any company (except
+financial institutions) AFTER a transaction. The primary intent is "we
+received your payment" or "here's your bill." NOT order status updates.
+
+Orders: Order confirmations and shipping notifications. Status updates
+about items you've purchased - placed, shipped, delivered, delayed.
+
+AccountSecurity: Security-critical messages requiring immediate action.
+Password resets, 2FA codes, login alerts, suspicious activity warnings.
 
 Personal: Personal correspondence from friends and family.
+```
+
+**Commands:**
+```bash
+mailmap categories          # List current categories
+mailmap learn               # Generate categories from existing Thunderbird folders
+mailmap init --limit 500    # Analyze emails and suggest folder structure
 ```
 
 ## CLI Commands
