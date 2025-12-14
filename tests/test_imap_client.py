@@ -350,3 +350,89 @@ class TestImapMailboxOperations:
         result = mailbox.fetch_raw_email(999, "INBOX")
 
         assert result is None
+
+
+class TestFetchAllMessageIds:
+    """Tests for fetch_all_message_ids with various header formats."""
+
+    def test_simple_message_id(self, imap_config, mock_imap_client):
+        """Test parsing a simple single-line Message-ID."""
+        mock_imap_client.search.return_value = [1]
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID: <simple@example.com>\r\n"}
+        }
+
+        mailbox = ImapMailbox(imap_config)
+        mailbox.connect()
+        ids = mailbox.fetch_all_message_ids("INBOX")
+
+        assert ids == ["<simple@example.com>"]
+
+    def test_folded_message_id_crlf(self, imap_config, mock_imap_client):
+        """Test parsing a folded Message-ID with CRLF continuation."""
+        mock_imap_client.search.return_value = [1]
+        # Folded header: Message-ID:\r\n <actual-id>
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\r\n <folded@example.com>\r\n"}
+        }
+
+        mailbox = ImapMailbox(imap_config)
+        mailbox.connect()
+        ids = mailbox.fetch_all_message_ids("INBOX")
+
+        assert ids == ["<folded@example.com>"]
+
+    def test_folded_message_id_lf(self, imap_config, mock_imap_client):
+        """Test parsing a folded Message-ID with LF continuation."""
+        mock_imap_client.search.return_value = [1]
+        # Folded header: Message-ID:\n <actual-id>
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\n <folded@example.com>\n"}
+        }
+
+        mailbox = ImapMailbox(imap_config)
+        mailbox.connect()
+        ids = mailbox.fetch_all_message_ids("INBOX")
+
+        assert ids == ["<folded@example.com>"]
+
+    def test_folded_message_id_tab(self, imap_config, mock_imap_client):
+        """Test parsing a folded Message-ID with tab continuation."""
+        mock_imap_client.search.return_value = [1]
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\r\n\t<tabbed@example.com>\r\n"}
+        }
+
+        mailbox = ImapMailbox(imap_config)
+        mailbox.connect()
+        ids = mailbox.fetch_all_message_ids("INBOX")
+
+        assert ids == ["<tabbed@example.com>"]
+
+    def test_multiple_message_ids(self, imap_config, mock_imap_client):
+        """Test parsing multiple messages with different formats."""
+        mock_imap_client.search.return_value = [1, 2, 3]
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID: <simple@example.com>\r\n"},
+            2: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\r\n <folded@example.com>\r\n"},
+            3: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\n\t<tabbed@example.com>\n"},
+        }
+
+        mailbox = ImapMailbox(imap_config)
+        mailbox.connect()
+        ids = mailbox.fetch_all_message_ids("INBOX")
+
+        assert len(ids) == 3
+        assert "<simple@example.com>" in ids
+        assert "<folded@example.com>" in ids
+        assert "<tabbed@example.com>" in ids
+
+    def test_empty_folder(self, imap_config, mock_imap_client):
+        """Test empty folder returns empty list."""
+        mock_imap_client.search.return_value = []
+
+        mailbox = ImapMailbox(imap_config)
+        mailbox.connect()
+        ids = mailbox.fetch_all_message_ids("INBOX")
+
+        assert ids == []

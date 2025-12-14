@@ -170,7 +170,10 @@ class ImapMailbox:
             header_data = data.get(b"BODY[HEADER.FIELDS (MESSAGE-ID)]", b"")
             if header_data:
                 # Parse the header to extract Message-ID
+                # Unfold header first (RFC 5322: folded headers have CRLF + whitespace)
                 header_str = header_data.decode("utf-8", errors="replace")
+                header_str = header_str.replace("\r\n ", " ").replace("\r\n\t", " ")
+                header_str = header_str.replace("\n ", " ").replace("\n\t", " ")
                 for line in header_str.split("\n"):
                     if line.lower().startswith("message-id:"):
                         msg_id = line.split(":", 1)[1].strip()
