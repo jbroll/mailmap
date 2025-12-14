@@ -18,10 +18,26 @@ logger = logging.getLogger("mailmap")
 class EmailProcessor:
     """Process incoming emails through the classification pipeline."""
 
-    def __init__(self, config: Config, db: Database):
+    def __init__(self, config: Config, db: Database, *, move: bool = False):
         self.config = config
         self.db = db
+        self.move = move
         self._queue: asyncio.Queue[EmailMessage] = asyncio.Queue()
+        self._mailbox: ImapMailbox | None = None
+
+    def _get_mailbox(self) -> ImapMailbox:
+        """Get or create IMAP connection for moves."""
+        if self._mailbox is None:
+            self._mailbox = ImapMailbox(self.config.imap)
+            self._mailbox.connect()
+        return self._mailbox
+
+    def _move_to_folder(self, message: EmailMessage, folder: str) -> None:
+        """Move an email to the destination folder."""
+        mailbox = self._get_mailbox()
+        mailbox.ensure_folder(folder)
+        mailbox.move_email(message.uid, message.folder, folder)
+        logger.info(f"Moved to '{folder}'")
 
     def enqueue(self, message: EmailMessage) -> None:
         """Add a message to the processing queue."""
@@ -73,10 +89,14 @@ class EmailProcessor:
             f"Classified as '{classification.predicted_folder}' (confidence: {classification.confidence:.2f})"
         )
 
+        # Move to destination folder if enabled
+        if self.move:
+            self._move_to_folder(message, classification.predicted_folder)
 
-async def run_listener(config: Config, db: Database) -> None:
+
+async def run_listener(config: Config, db: Database, *, move: bool = False) -> None:
     """Run the IMAP listener and email processor."""
-    processor = EmailProcessor(config, db)
+    processor = EmailProcessor(config, db, move=move)
     loop = asyncio.get_event_loop()
 
     processor_task = asyncio.create_task(processor.process_loop())
@@ -96,13 +116,13 @@ async def run_listener(config: Config, db: Database) -> None:
         processor_task.cancel()
 
 
-async def process_existing_emails(config: Config, db: Database) -> int:
+async def process_existing_emails(config: Config, db: Database, *, move: bool = False) -> int:
     """Process existing unclassified emails in monitored folders.
 
     Returns the number of emails processed.
     """
     mailbox = ImapMailbox(config.imap)
-    processor = EmailProcessor(config, db)
+    processor = EmailProcessor(config, db, move=move)
     processed = 0
 
     try:
@@ -135,7 +155,7 @@ async def process_existing_emails(config: Config, db: Database) -> int:
     return processed
 
 
-async def run_daemon(config: Config, db: Database, *, process_existing: bool = False) -> None:
+async def run_daemon(config: Config, db: Database, *, process_existing: bool = False, move: bool = False) -> None:
     """Run the full mailmap daemon."""
     from ..websocket_server import run_websocket_server
 
@@ -145,14 +165,14 @@ async def run_daemon(config: Config, db: Database, *, process_existing: bool = F
     try:
         # Process existing emails if requested (before starting listener)
         if process_existing:
-            await process_existing_emails(config, db)
+            await process_existing_emails(config, db, move=move)
 
         # Build list of services to run
         tasks = []
 
         # IMAP listener
         logger.info("Starting email listener...")
-        tasks.append(run_listener(config, db))
+        tasks.append(run_listener(config, db, move=move))
 
         # WebSocket server (if enabled)
         if config.websocket.enabled:
