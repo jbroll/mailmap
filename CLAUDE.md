@@ -40,7 +40,7 @@ mailmap/
 │   ├── init.py         # Suggest folder structure
 │   ├── upload.py       # Upload to IMAP, cleanup
 │   ├── imap_ops.py     # IMAP management commands
-│   └── utils.py        # list, summary, clear, reset
+│   └── utils.py        # list, summary, clear, reset, sync
 ├── sources/            # Email source abstractions
 │   ├── thunderbird.py  # ThunderbirdSource
 │   └── imap.py         # ImapSource
@@ -82,6 +82,38 @@ ImapListener (IDLE)
     → EmailProcessor.process_loop
     → _process_email (classify via LLM, update DB, optionally move)
 ```
+
+### Bulk Classification Flow (classify command)
+
+The classify command handles two types of emails:
+
+1. **New emails** - Need LLM classification, processed concurrently
+2. **Pre-classified but untransferred** - Transfer only with rate limiting
+
+```
+Source (Thunderbird/IMAP)
+    → For each email:
+        - If classified + transferred → skip
+        - If classified + NOT transferred → add to transfer queue
+        - If NOT classified → add to classify queue
+    → Process classify queue (concurrent LLM calls)
+    → Process transfer queue (sequential, rate-limited)
+```
+
+Use `--rate-limit SECS` to control delay between transfer operations (default: 1.0s).
+
+### Sync and Transfer Commands
+
+- `mailmap sync` - Sync DB transfer state with actual IMAP folder contents
+  - Clears all transferred_at markers
+  - Scans category folders on IMAP server
+  - Marks found emails as transferred
+  - Use `--dry-run` to preview changes
+
+- `mailmap transfer` - Transfer pre-classified emails to IMAP (standalone)
+  - Processes only classified but untransferred emails
+  - Rate-limited to avoid overwhelming IMAP server
+  - Use `--move` for move instead of copy
 
 ### Source/Target Abstraction
 
@@ -161,7 +193,8 @@ emails (
     confidence REAL,
     is_spam INTEGER,
     spam_reason TEXT,
-    processed_at TIMESTAMP
+    processed_at TIMESTAMP,
+    transferred_at TIMESTAMP  -- When email was copied/moved to target folder
 )
 ```
 
