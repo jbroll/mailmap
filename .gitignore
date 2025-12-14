@@ -43,3 +43,4 @@ config.toml
 *.db
 mailmap.db
 *.xpi
+error.log

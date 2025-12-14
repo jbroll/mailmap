@@ -9,7 +9,7 @@ from datetime import datetime
 from ..categories import get_category_descriptions, load_categories
 from ..config import Config
 from ..database import Database, Email
-from ..imap_client import EmailMessage, ImapListener
+from ..imap_client import EmailMessage, ImapListener, ImapMailbox
 from ..llm import OllamaClient
 
 logger = logging.getLogger("mailmap")
@@ -77,14 +77,17 @@ class EmailProcessor:
 async def run_listener(config: Config, db: Database) -> None:
     """Run the IMAP listener and email processor."""
     processor = EmailProcessor(config, db)
+    loop = asyncio.get_event_loop()
 
     processor_task = asyncio.create_task(processor.process_loop())
 
     listener = ImapListener(config.imap)
 
     def on_new_email(message: EmailMessage) -> None:
+        """Callback from IMAP thread - must use thread-safe scheduling."""
         logger.info(f"New email in {message.folder}: {message.subject[:50]}...")
-        processor.enqueue(message)
+        # Schedule enqueue on the event loop (called from thread)
+        loop.call_soon_threadsafe(processor.enqueue, message)
 
     try:
         await listener.start(on_new_email)
@@ -93,7 +96,46 @@ async def run_listener(config: Config, db: Database) -> None:
         processor_task.cancel()
 
 
-async def run_daemon(config: Config, db: Database) -> None:
+async def process_existing_emails(config: Config, db: Database) -> int:
+    """Process existing unclassified emails in monitored folders.
+
+    Returns the number of emails processed.
+    """
+    mailbox = ImapMailbox(config.imap)
+    processor = EmailProcessor(config, db)
+    processed = 0
+
+    try:
+        mailbox.connect()
+        logger.info("Checking for existing unclassified emails...")
+
+        for folder in config.imap.idle_folders:
+            uids = mailbox.fetch_recent_uids(folder, limit=100)
+            logger.info(f"Found {len(uids)} recent emails in {folder}")
+
+            for uid in uids:
+                msg = mailbox.fetch_email(uid, folder)
+                if msg:
+                    # Check if already classified
+                    existing = db.get_email(msg.message_id)
+                    if existing and existing.classification:
+                        continue  # Already classified
+
+                    # Process directly (not queued)
+                    try:
+                        await processor._process_email(msg)
+                        processed += 1
+                    except Exception as e:
+                        logger.error(f"Error processing {msg.message_id}: {e}")
+
+        logger.info(f"Processed {processed} existing emails")
+    finally:
+        mailbox.disconnect()
+
+    return processed
+
+
+async def run_daemon(config: Config, db: Database, *, process_existing: bool = False) -> None:
     """Run the full mailmap daemon."""
     from ..websocket_server import run_websocket_server
 
@@ -101,6 +143,10 @@ async def run_daemon(config: Config, db: Database) -> None:
     db.init_schema()
 
     try:
+        # Process existing emails if requested (before starting listener)
+        if process_existing:
+            await process_existing_emails(config, db)
+
         # Build list of services to run
         tasks = []
 

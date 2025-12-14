@@ -113,6 +113,11 @@ def build_parser() -> argparse.ArgumentParser:
     # daemon - Run IMAP daemon (default)
     daemon_parser = subparsers.add_parser("daemon", help="Run IMAP listener daemon")
     add_common_args(daemon_parser)
+    daemon_parser.add_argument(
+        "--process-existing",
+        action="store_true",
+        help="Process existing unclassified emails in monitored folders on startup",
+    )
 
     # learn - Learn categories from existing folders (saves to categories.txt)
     learn_parser = subparsers.add_parser("learn", help="Learn categories from existing Thunderbird folders")
@@ -315,7 +320,8 @@ def main() -> None:
         target_account = getattr(args, "target_account", "local")
         asyncio.run(cleanup_thunderbird_folders(config, db, target_account=target_account))
     elif args.command == "daemon":
-        asyncio.run(run_daemon(config, db))
+        process_existing = getattr(args, "process_existing", False)
+        asyncio.run(run_daemon(config, db, process_existing=process_existing))
     elif args.command == "folders":
         source_type = getattr(args, "source_type", "imap")
         asyncio.run(list_folders_cmd(config, source_type))
