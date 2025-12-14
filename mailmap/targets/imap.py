@@ -91,15 +91,18 @@ class ImapTarget:
             logger.error(f"Failed to delete folder {folder}: {e}")
             return False
 
-    async def copy_email(self, message_id: str, target_folder: str) -> bool:
+    async def copy_email(
+        self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
+    ) -> bool:
         """Copy an email to a target folder.
 
-        This searches for the email by Message-ID, fetches it,
-        and appends to the target folder.
+        If raw_bytes is provided, uploads directly (for cross-server transfers).
+        Otherwise searches for the email by Message-ID on this server.
 
         Args:
             message_id: Message-ID header of the email
             target_folder: Destination folder
+            raw_bytes: Optional raw email content for cross-server uploads
 
         Returns:
             True if successful
@@ -116,11 +119,13 @@ class ImapTarget:
             target_folder,
         )
 
-        # Search for message by Message-ID across all folders
-        raw_email = await self._find_and_fetch_email(message_id)
-        if not raw_email:
-            logger.warning(f"Email not found: {message_id}")
-            return False
+        # Use provided raw bytes or search for email on server
+        raw_email = raw_bytes
+        if raw_email is None:
+            raw_email = await self._find_and_fetch_email(message_id)
+            if not raw_email:
+                logger.warning(f"Email not found: {message_id}")
+                return False
 
         # Append to target folder
         try:
@@ -135,15 +140,19 @@ class ImapTarget:
             logger.error(f"Failed to copy {message_id}: {e}")
             return False
 
-    async def move_email(self, message_id: str, target_folder: str) -> bool:
+    async def move_email(
+        self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
+    ) -> bool:
         """Move an email to a target folder.
 
-        This searches for the email by Message-ID and uses IMAP MOVE
-        if available, otherwise copies and deletes.
+        If raw_bytes is provided, uploads directly (for cross-server transfers).
+        Note: cross-server "move" only uploads; source deletion must be handled separately.
+        Otherwise searches for the email by Message-ID and uses IMAP MOVE.
 
         Args:
             message_id: Message-ID header of the email
             target_folder: Destination folder
+            raw_bytes: Optional raw email content for cross-server uploads
 
         Returns:
             True if successful
@@ -160,7 +169,21 @@ class ImapTarget:
             target_folder,
         )
 
-        # Find the email
+        # If raw bytes provided, upload directly (cross-server transfer)
+        if raw_bytes is not None:
+            try:
+                await loop.run_in_executor(
+                    None,
+                    self._mailbox.append_email,
+                    target_folder,
+                    raw_bytes,
+                )
+                return True
+            except Exception as e:
+                logger.error(f"Failed to upload {message_id}: {e}")
+                return False
+
+        # Find the email on this server
         location = await self._find_email(message_id)
         if not location:
             logger.warning(f"Email not found: {message_id}")

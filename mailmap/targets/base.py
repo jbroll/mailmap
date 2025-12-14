@@ -42,24 +42,30 @@ class EmailTarget(Protocol):
         """
         ...
 
-    async def copy_email(self, message_id: str, target_folder: str) -> bool:
+    async def copy_email(
+        self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
+    ) -> bool:
         """Copy an email to a target folder.
 
         Args:
             message_id: Message-ID header of the email
             target_folder: Destination folder
+            raw_bytes: Optional raw email content for cross-server uploads
 
         Returns:
             True if successful
         """
         ...
 
-    async def move_email(self, message_id: str, target_folder: str) -> bool:
+    async def move_email(
+        self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
+    ) -> bool:
         """Move an email to a target folder.
 
         Args:
             message_id: Message-ID header of the email
             target_folder: Destination folder
+            raw_bytes: Optional raw email content for cross-server uploads
 
         Returns:
             True if successful

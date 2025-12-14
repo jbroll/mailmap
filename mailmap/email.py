@@ -23,6 +23,7 @@ class UnifiedEmail:
     source_type: str = ""  # "imap", "thunderbird", "websocket"
     source_ref: Any = None  # uid (IMAP) or mbox_path (Thunderbird)
     headers: dict[str, str] = field(default_factory=dict)
+    raw_bytes: bytes | None = None  # Raw email content for cross-server transfers
 
     @classmethod
     def from_thunderbird(cls, tb_email: "ThunderbirdEmail") -> "UnifiedEmail":

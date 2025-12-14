@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime
@@ -11,13 +12,43 @@ from typing import TYPE_CHECKING
 from ..categories import get_category_descriptions, load_categories
 from ..config import Config
 from ..database import Database, Email
+from ..email import UnifiedEmail
 from ..llm import OllamaClient
+from ..mbox import get_raw_email
 from ..spam import is_spam, parse_rules
 
 if TYPE_CHECKING:
     from ..websocket_server import WebSocketServer
 
 logger = logging.getLogger("mailmap")
+
+
+async def _get_raw_bytes(email: UnifiedEmail) -> bytes | None:
+    """Get raw email bytes for cross-server transfers.
+
+    Args:
+        email: UnifiedEmail with source information
+
+    Returns:
+        Raw email bytes if available, None otherwise
+    """
+    # If raw_bytes already populated, use it
+    if email.raw_bytes:
+        return email.raw_bytes
+
+    # For Thunderbird source, load from mbox file
+    if email.source_type == "thunderbird" and email.source_ref:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            get_raw_email,
+            str(email.source_ref),
+            email.message_id,
+        )
+
+    # For other sources, raw_bytes must be pre-populated or we return None
+    # (IMAP target will try to find email on server)
+    return None
 
 
 async def bulk_classify(
@@ -218,10 +249,13 @@ async def bulk_classify(
                                     else "Unknown"
                                 )
 
+                                # Get raw bytes for cross-server transfers
+                                raw_bytes = await _get_raw_bytes(email)
+
                                 if move:
-                                    success = await target.move_email(email.message_id, target_folder)
+                                    success = await target.move_email(email.message_id, target_folder, raw_bytes)
                                 else:
-                                    success = await target.copy_email(email.message_id, target_folder)
+                                    success = await target.copy_email(email.message_id, target_folder, raw_bytes)
 
                                 if success:
                                     total_copied += 1

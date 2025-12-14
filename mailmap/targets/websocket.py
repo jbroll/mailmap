@@ -122,12 +122,15 @@ class WebSocketTarget:
             logger.error(f"Failed to delete folder {folder}: {response.error}")
         return False
 
-    async def copy_email(self, message_id: str, target_folder: str) -> bool:
+    async def copy_email(
+        self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
+    ) -> bool:
         """Copy an email to a target folder via extension.
 
         Args:
             message_id: Message-ID header of the email
             target_folder: Destination folder
+            raw_bytes: Ignored - WebSocket uses Thunderbird's native copy
 
         Returns:
             True if successful
@@ -149,12 +152,15 @@ class WebSocketTarget:
             logger.warning(f"Failed to copy {message_id}: {response.error}")
         return False
 
-    async def move_email(self, message_id: str, target_folder: str) -> bool:
+    async def move_email(
+        self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
+    ) -> bool:
         """Move an email to a target folder via extension.
 
         Args:
             message_id: Message-ID header of the email
             target_folder: Destination folder
+            raw_bytes: Ignored - WebSocket uses Thunderbird's native move
 
         Returns:
             True if successful
