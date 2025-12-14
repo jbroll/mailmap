@@ -40,6 +40,12 @@ Requires Ollama running locally with a model (default: `qwen2.5:7b`).
 # Run the daemon (monitors IMAP and classifies emails)
 mailmap daemon
 
+# Daemon with automatic folder organization (moves emails after classification)
+mailmap daemon --move
+
+# Process existing unclassified INBOX emails on startup, then watch for new
+mailmap daemon --move --process-existing
+
 # Learn categories from existing Thunderbird folder structure
 # Generates descriptions and saves to categories.txt
 mailmap learn
@@ -152,6 +158,12 @@ Classify command also supports (requires Thunderbird extension):
 --copy                 # Copy classified emails to target folders
 --move                 # Move classified emails to target folders
 --target-account DEST  # Target: 'local' (default) or server name (e.g., outlook.office365.com)
+```
+
+Daemon command options:
+```bash
+--move                 # Move classified emails to IMAP folders (creates folders if needed)
+--process-existing     # Process existing unclassified emails in INBOX on startup
 ```
 
 ## Testing
