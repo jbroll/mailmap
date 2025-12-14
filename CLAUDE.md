@@ -88,6 +88,21 @@ mailmap reset
 # Delete classification folders from Thunderbird (via extension)
 mailmap cleanup                                            # Delete from Local Folders
 mailmap cleanup --target-account outlook.office365.com     # Delete from IMAP account
+
+# IMAP folder and email management
+mailmap folders                           # List folders with email counts
+mailmap folders --source-type thunderbird # List from Thunderbird instead
+
+mailmap emails INBOX                      # List emails in a folder
+mailmap emails INBOX --limit 100          # Limit results
+
+mailmap read INBOX 123                    # Read email by UID
+
+mailmap create-folder MyFolder            # Create IMAP folder
+mailmap delete-folder MyFolder            # Delete IMAP folder
+
+mailmap move INBOX 123 Archive            # Move email to folder
+mailmap copy INBOX 123 Archive            # Copy email to folder
 ```
 
 ## Typical Workflow
