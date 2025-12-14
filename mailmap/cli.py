@@ -276,14 +276,16 @@ def build_parser() -> argparse.ArgumentParser:
     read_parser.add_argument("uid", type=int, help="Email UID")
 
     # create-folder - Create a folder
-    create_folder_parser = subparsers.add_parser("create-folder", help="Create a folder on IMAP server")
+    create_folder_parser = subparsers.add_parser("create-folder", help="Create a folder on target")
     add_common_args(create_folder_parser)
     create_folder_parser.add_argument("folder", help="Folder name to create")
+    add_target_args(create_folder_parser)
 
     # delete-folder - Delete a folder
-    delete_folder_parser = subparsers.add_parser("delete-folder", help="Delete a folder from IMAP server")
+    delete_folder_parser = subparsers.add_parser("delete-folder", help="Delete a folder from target")
     add_common_args(delete_folder_parser)
     delete_folder_parser.add_argument("folder", help="Folder name to delete")
+    add_target_args(delete_folder_parser)
 
     # move - Move an email
     move_parser = subparsers.add_parser("move", help="Move an email to another folder")
@@ -400,9 +402,13 @@ def _run_command(args, config: Config, db: Database) -> None:
     elif args.command == "read":
         asyncio.run(read_email_cmd(config, args.folder, args.uid))
     elif args.command == "create-folder":
-        create_folder_cmd(config, args.folder)
+        target_account = getattr(args, "target_account", "imap")
+        websocket_port = getattr(args, "websocket", None)
+        asyncio.run(create_folder_cmd(config, args.folder, target_account, websocket_port))
     elif args.command == "delete-folder":
-        delete_folder_cmd(config, args.folder)
+        target_account = getattr(args, "target_account", "imap")
+        websocket_port = getattr(args, "websocket", None)
+        asyncio.run(delete_folder_cmd(config, args.folder, target_account, websocket_port))
     elif args.command == "move":
         move_email_cmd(config, args.folder, args.uid, args.dest)
     elif args.command == "copy":

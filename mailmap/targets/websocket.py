@@ -1,12 +1,11 @@
 """WebSocket email target (via Thunderbird extension)."""
 
+import asyncio
 import logging
-from typing import TYPE_CHECKING
 
+from mailmap.config import Config, WebSocketConfig
 from mailmap.protocol import Action
-
-if TYPE_CHECKING:
-    from mailmap.websocket_server import WebSocketServer
+from mailmap.websocket_server import WebSocketServer
 
 logger = logging.getLogger("mailmap.targets.websocket")
 
@@ -14,33 +13,65 @@ logger = logging.getLogger("mailmap.targets.websocket")
 class WebSocketTarget:
     """Email target via WebSocket connection to Thunderbird extension.
 
-    This target requires a running WebSocket server with a connected
-    Thunderbird extension. It can copy/move emails to both Local Folders
-    and IMAP accounts configured in Thunderbird.
+    This target manages its own WebSocket server lifecycle. It starts the server
+    on connect() and waits for a Thunderbird extension to connect. It can copy/move
+    emails to both Local Folders and IMAP accounts configured in Thunderbird.
     """
 
-    def __init__(self, ws_server: "WebSocketServer", target_account: str = "local"):
+    def __init__(
+        self,
+        config: Config,
+        target_account: str = "local",
+        websocket_port: int = 9753,
+    ):
         """Initialize WebSocket target.
 
         Args:
-            ws_server: Running WebSocket server instance
+            config: Application configuration
             target_account: Target account type:
                 - "local": Thunderbird Local Folders
-                - "imap": First IMAP account
+                - "imap": First IMAP account in Thunderbird
                 - Account ID: Specific Thunderbird account ID
+            websocket_port: Port for WebSocket server (default: 9753)
         """
-        self._ws_server = ws_server
+        self._config = config
         self._target_account = target_account
+        self._port = websocket_port
         self._account_id: str | None = None
+        self._ws_server: WebSocketServer | None = None
+        self._server_task: asyncio.Task | None = None
 
     @property
     def target_type(self) -> str:
         return "websocket"
 
     async def connect(self) -> None:
-        """Verify WebSocket connection and resolve account ID."""
-        if not self._ws_server.is_connected:
-            raise RuntimeError("No Thunderbird extension connected")
+        """Start WebSocket server and wait for extension to connect."""
+        from mailmap.database import Database
+        from mailmap.websocket_server import start_websocket_and_wait
+
+        # Create WebSocket config
+        ws_config = WebSocketConfig(
+            enabled=True,
+            host="localhost",
+            port=self._port,
+            auth_token=self._config.websocket.auth_token if self._config.websocket else "",
+        )
+
+        # Need a database for the WebSocket server
+        db = Database(self._config.database.path)
+
+        # Start server and wait for connection
+        result = await start_websocket_and_wait(
+            ws_config, db, self._config.database.categories_file, timeout=30
+        )
+        if result is None:
+            raise RuntimeError(
+                "Timeout waiting for Thunderbird extension to connect.\n"
+                "Make sure the MailMap extension is installed and enabled."
+            )
+
+        self._ws_server, self._server_task = result
 
         # Resolve target account to account ID
         if self._target_account in ("local", "imap"):
@@ -72,8 +103,16 @@ class WebSocketTarget:
         logger.info(f"WebSocket target connected to account: {self._account_id}")
 
     async def disconnect(self) -> None:
-        """No cleanup needed for WebSocket target."""
+        """Stop WebSocket server and cleanup."""
         self._account_id = None
+
+        if self._ws_server:
+            await self._ws_server.stop()
+            self._ws_server = None
+
+        if self._server_task:
+            self._server_task.cancel()
+            self._server_task = None
 
     async def create_folder(self, folder: str) -> bool:
         """Create a folder via extension.
@@ -84,7 +123,7 @@ class WebSocketTarget:
         Returns:
             True if created, False if already exists
         """
-        if not self._account_id:
+        if not self._account_id or not self._ws_server:
             raise RuntimeError("Target not connected")
 
         response = await self._ws_server.send_request(
@@ -109,7 +148,7 @@ class WebSocketTarget:
         Returns:
             True if deleted, False if not found
         """
-        if not self._account_id:
+        if not self._account_id or not self._ws_server:
             raise RuntimeError("Target not connected")
 
         response = await self._ws_server.send_request(
@@ -128,7 +167,7 @@ class WebSocketTarget:
         Returns:
             List of folder names
         """
-        if not self._account_id:
+        if not self._account_id or not self._ws_server:
             raise RuntimeError("Target not connected")
 
         response = await self._ws_server.send_request(
@@ -155,7 +194,7 @@ class WebSocketTarget:
         Returns:
             True if successful
         """
-        if not self._account_id:
+        if not self._account_id or not self._ws_server:
             raise RuntimeError("Target not connected")
 
         response = await self._ws_server.send_request(
@@ -185,7 +224,7 @@ class WebSocketTarget:
         Returns:
             True if successful
         """
-        if not self._account_id:
+        if not self._account_id or not self._ws_server:
             raise RuntimeError("Target not connected")
 
         response = await self._ws_server.send_request(

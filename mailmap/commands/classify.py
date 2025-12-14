@@ -8,7 +8,6 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from ..categories import get_category_descriptions, load_categories
 from ..config import Config
@@ -18,9 +17,6 @@ from ..llm import OllamaClient
 from ..mbox import get_raw_email
 from ..spam import is_spam, parse_rules
 from ..targets.base import EmailTarget
-
-if TYPE_CHECKING:
-    from ..websocket_server import WebSocketServer
 
 logger = logging.getLogger("mailmap")
 
@@ -164,10 +160,10 @@ async def _process_single_email(
 async def bulk_classify(
     config: Config,
     db: Database,
-    ws_server: WebSocketServer | None = None,
     copy: bool = False,
     move: bool = False,
     target_account: str = "local",
+    websocket_port: int | None = None,
     min_confidence: float = 0.5,
     force: bool = False,
     concurrency: int = 1,
@@ -180,10 +176,10 @@ async def bulk_classify(
     Args:
         config: Application configuration
         db: Database instance
-        ws_server: Optional WebSocket server for copy/move operations
         copy: If True with target, copy messages to target folders
         move: If True with target, move messages to target folders
         target_account: Target account for folders: 'local', 'imap', or account ID
+        websocket_port: Port for WebSocket connection (required for 'local' target)
         min_confidence: Minimum confidence to copy/move (below this goes to Unknown)
         force: If True, re-classify emails even if already in database
         concurrency: Number of emails to process concurrently (default: 1)
@@ -219,21 +215,13 @@ async def bulk_classify(
 
     # Select target if copy/move requested
     target = None
-    if ws_server or ((copy or move) and target_account == "imap"):
+    if copy or move:
         try:
-            target = select_target(config, ws_server, target_account)
+            target = select_target(config, target_account, websocket_port)
             logger.info(f"Using {target.target_type} target (account: {target_account})")
         except ValueError as e:
             logger.error(str(e))
             return classifications
-
-    # Error if copy/move requested but no target available
-    if (copy or move) and target is None:
-        logger.error(
-            f"No target available for {'move' if move else 'copy'}. "
-            f"Use --target-account imap or --websocket."
-        )
-        return classifications
 
     # Load spam rules
     spam_rules = parse_rules(config.spam.rules) if config.spam.enabled else []
@@ -408,51 +396,26 @@ async def run_bulk_classify(
         force: If True, re-classify emails even if already processed
         concurrency: Number of emails to process concurrently (default: 1)
     """
-    from ..config import WebSocketConfig
-    from ..websocket_server import start_websocket_and_wait
-
     if copy and move:
         logger.error("Cannot specify both --copy and --move")
+        return
+
+    # Validate target requirements
+    if (copy or move) and target_account == "local" and websocket_port is None:
+        logger.error("Target 'local' requires --websocket. Use --target-account imap for direct IMAP.")
         return
 
     db.connect()
     db.init_schema()
 
-    ws_server = None
-    server_task = None
-
     try:
-        # If copy or move requested with WebSocket, start server and wait for extension
-        if (copy or move) and websocket_port is not None:
-            ws_config = WebSocketConfig(
-                enabled=True,
-                host="localhost",
-                port=websocket_port,
-                auth_token=config.websocket.auth_token if config.websocket else "",
-            )
-
-            result = await start_websocket_and_wait(
-                ws_config, db, config.database.categories_file
-            )
-            if result is None:
-                return
-            ws_server, server_task = result
-
-            logger.info("Starting classification with immediate copy/move...")
-        elif (copy or move) and target_account == "local":
-            logger.error("Target 'local' requires --websocket. Use --target-account imap for direct IMAP.")
-            return
-
-        # Use the new abstraction-based classify function
         await bulk_classify(
-            config, db, ws_server=ws_server, copy=copy, move=move,
-            target_account=target_account, force=force, concurrency=concurrency
+            config, db,
+            copy=copy, move=move,
+            target_account=target_account,
+            websocket_port=websocket_port,
+            force=force,
+            concurrency=concurrency
         )
-
     finally:
-        # Stop WebSocket server if it was started
-        if ws_server:
-            await ws_server.stop()
-        if server_task:
-            server_task.cancel()
         db.close()

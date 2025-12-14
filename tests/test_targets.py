@@ -1,10 +1,10 @@
 """Tests for email target abstractions."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mailmap.config import Config, ImapConfig, ThunderbirdConfig, WebSocketConfig
+from mailmap.config import Config, DatabaseConfig, ImapConfig, ThunderbirdConfig, WebSocketConfig
 from mailmap.targets import (
     ImapTarget,
     WebSocketTarget,
@@ -13,87 +13,114 @@ from mailmap.targets import (
 from mailmap.targets.base import EmailTarget as EmailTargetProtocol
 
 
+@pytest.fixture
+def mock_config():
+    """Create a mock config for WebSocketTarget tests."""
+    return Config(
+        imap=ImapConfig(host="imap.example.com"),
+        websocket=WebSocketConfig(enabled=True, auth_token="test-token"),
+        thunderbird=ThunderbirdConfig(),
+        database=DatabaseConfig(path="test.db", categories_file="categories.txt"),
+    )
+
+
 class TestWebSocketTarget:
-    def test_target_type(self):
-        mock_ws = MagicMock()
-        target = WebSocketTarget(mock_ws, "local")
+    def test_target_type(self, mock_config):
+        target = WebSocketTarget(mock_config, "local", 9753)
         assert target.target_type == "websocket"
 
     @pytest.mark.asyncio
-    async def test_connect_raises_when_not_connected(self):
-        mock_ws = MagicMock()
-        mock_ws.is_connected = False
+    async def test_connect_raises_on_timeout(self, mock_config):
+        """Test that connect raises when no extension connects."""
+        with patch("mailmap.websocket_server.start_websocket_and_wait", new_callable=AsyncMock) as mock_start:
+            mock_start.return_value = None  # Timeout
 
-        target = WebSocketTarget(mock_ws, "local")
-        with pytest.raises(RuntimeError, match="No Thunderbird extension connected"):
-            await target.connect()
+            target = WebSocketTarget(mock_config, "local", 9753)
+            with pytest.raises(RuntimeError, match="Timeout waiting for Thunderbird extension"):
+                await target.connect()
 
     @pytest.mark.asyncio
-    async def test_context_manager(self):
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-        mock_ws.send_request = AsyncMock(return_value=MagicMock(
+    async def test_connect_resolves_local_account(self, mock_config):
+        """Test that connect resolves 'local' to Local Folders account ID."""
+        mock_ws_server = MagicMock()
+        mock_ws_server.send_request = AsyncMock(return_value=MagicMock(
             ok=True,
             result={"accounts": [{"id": "account1", "type": "none"}]}
         ))
+        mock_ws_server.stop = AsyncMock()
+        mock_task = MagicMock()
 
-        async with WebSocketTarget(mock_ws, "local") as target:
+        with patch("mailmap.websocket_server.start_websocket_and_wait", new_callable=AsyncMock) as mock_start:
+            mock_start.return_value = (mock_ws_server, mock_task)
+
+            target = WebSocketTarget(mock_config, "local", 9753)
+            await target.connect()
+
             assert target._account_id == "account1"
-        assert target._account_id is None
+
+            await target.disconnect()
 
     @pytest.mark.asyncio
-    async def test_create_folder(self):
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-        mock_ws.send_request = AsyncMock(side_effect=[
-            MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
-            MagicMock(ok=True, result={"created": True}),
-        ])
-
-        async with WebSocketTarget(mock_ws, "local") as target:
-            result = await target.create_folder("TestFolder")
-            assert result is True
-
-    @pytest.mark.asyncio
-    async def test_copy_email(self):
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-        mock_ws.send_request = AsyncMock(side_effect=[
-            MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
-            MagicMock(ok=True, result={}),
-        ])
-
-        async with WebSocketTarget(mock_ws, "local") as target:
-            result = await target.copy_email("<msg@example.com>", "Inbox")
-            assert result is True
-
-    @pytest.mark.asyncio
-    async def test_move_email(self):
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-        mock_ws.send_request = AsyncMock(side_effect=[
-            MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
-            MagicMock(ok=True, result={}),
-        ])
-
-        async with WebSocketTarget(mock_ws, "local") as target:
-            result = await target.move_email("<msg@example.com>", "Archive")
-            assert result is True
-
-    @pytest.mark.asyncio
-    async def test_operations_fail_when_not_connected(self):
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-        mock_ws.send_request = AsyncMock(return_value=MagicMock(
-            ok=True,
-            result={"accounts": [{"id": "acc1", "type": "none"}]}
-        ))
-
-        target = WebSocketTarget(mock_ws, "local")
-        # Not connected via context manager
+    async def test_operations_fail_when_not_connected(self, mock_config):
+        target = WebSocketTarget(mock_config, "local", 9753)
+        # Not connected
 
         with pytest.raises(RuntimeError, match="Target not connected"):
             await target.create_folder("Test")
+
+    @pytest.mark.asyncio
+    async def test_create_folder(self, mock_config):
+        """Test creating a folder via WebSocket."""
+        mock_ws_server = MagicMock()
+        mock_ws_server.send_request = AsyncMock(side_effect=[
+            MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
+            MagicMock(ok=True, result={"created": True}),
+        ])
+        mock_ws_server.stop = AsyncMock()
+        mock_task = MagicMock()
+
+        with patch("mailmap.websocket_server.start_websocket_and_wait", new_callable=AsyncMock) as mock_start:
+            mock_start.return_value = (mock_ws_server, mock_task)
+
+            async with WebSocketTarget(mock_config, "local", 9753) as target:
+                result = await target.create_folder("TestFolder")
+                assert result is True
+
+    @pytest.mark.asyncio
+    async def test_copy_email(self, mock_config):
+        """Test copying an email via WebSocket."""
+        mock_ws_server = MagicMock()
+        mock_ws_server.send_request = AsyncMock(side_effect=[
+            MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
+            MagicMock(ok=True, result={}),
+        ])
+        mock_ws_server.stop = AsyncMock()
+        mock_task = MagicMock()
+
+        with patch("mailmap.websocket_server.start_websocket_and_wait", new_callable=AsyncMock) as mock_start:
+            mock_start.return_value = (mock_ws_server, mock_task)
+
+            async with WebSocketTarget(mock_config, "local", 9753) as target:
+                result = await target.copy_email("<msg@example.com>", "Inbox")
+                assert result is True
+
+    @pytest.mark.asyncio
+    async def test_move_email(self, mock_config):
+        """Test moving an email via WebSocket."""
+        mock_ws_server = MagicMock()
+        mock_ws_server.send_request = AsyncMock(side_effect=[
+            MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
+            MagicMock(ok=True, result={}),
+        ])
+        mock_ws_server.stop = AsyncMock()
+        mock_task = MagicMock()
+
+        with patch("mailmap.websocket_server.start_websocket_and_wait", new_callable=AsyncMock) as mock_start:
+            mock_start.return_value = (mock_ws_server, mock_task)
+
+            async with WebSocketTarget(mock_config, "local", 9753) as target:
+                result = await target.move_email("<msg@example.com>", "Archive")
+                assert result is True
 
 
 class TestImapTarget:
@@ -104,101 +131,83 @@ class TestImapTarget:
 
 
 class TestSelectTarget:
-    def test_select_websocket_for_local(self, mock_thunderbird_profile):
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-
-        config = Config(
-            imap=ImapConfig(host="imap.example.com"),
-            websocket=WebSocketConfig(enabled=True),
-            thunderbird=ThunderbirdConfig(profile_path=str(mock_thunderbird_profile)),
-        )
-        target = select_target(config, mock_ws, "local")
-        assert isinstance(target, WebSocketTarget)
-
-    def test_raises_for_local_without_websocket(self):
-        config = Config(
-            imap=ImapConfig(host="imap.example.com"),
-            websocket=WebSocketConfig(enabled=True),
-        )
-        with pytest.raises(ValueError, match="requires WebSocket connection"):
-            select_target(config, None, "local")
-
-    def test_select_websocket_for_server_name(self, mock_thunderbird_profile):
-        """Test selecting target by server name resolves to account ID."""
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-
-        config = Config(
-            imap=ImapConfig(host="imap.example.com"),
-            websocket=WebSocketConfig(enabled=True),
-            thunderbird=ThunderbirdConfig(profile_path=str(mock_thunderbird_profile)),
-        )
-        # Should resolve server name to account ID
-        target = select_target(config, mock_ws, "imap.example.com")
-        assert isinstance(target, WebSocketTarget)
-
-    def test_raises_for_unknown_server(self, mock_thunderbird_profile):
-        """Test that unknown server names raise an error."""
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-
-        config = Config(
-            imap=ImapConfig(host="imap.example.com"),
-            websocket=WebSocketConfig(enabled=True),
-            thunderbird=ThunderbirdConfig(profile_path=str(mock_thunderbird_profile)),
-        )
-        with pytest.raises(ValueError, match="not found in Thunderbird profile"):
-            select_target(config, mock_ws, "unknown.server.com")
-
-    def test_falls_back_to_imap_without_websocket(self):
-        """Test that server names fall back to IMAP when WebSocket not available."""
-        config = Config(
-            imap=ImapConfig(host="imap.example.com"),
-            websocket=WebSocketConfig(enabled=True),
-        )
-        target = select_target(config, None, "outlook.office365.com")
-        assert isinstance(target, ImapTarget)
-
     def test_select_imap_target_explicitly(self):
         """Test that target_account='imap' selects ImapTarget."""
         config = Config(
             imap=ImapConfig(host="imap.example.com"),
         )
-        target = select_target(config, None, "imap")
+        target = select_target(config, "imap")
         assert isinstance(target, ImapTarget)
+
+    def test_select_websocket_for_local_with_port(self, mock_config):
+        """Test that 'local' with websocket_port selects WebSocketTarget."""
+        target = select_target(mock_config, "local", websocket_port=9753)
+        assert isinstance(target, WebSocketTarget)
+
+    def test_raises_for_local_without_websocket_port(self):
+        """Test that 'local' without websocket_port raises an error."""
+        config = Config(
+            imap=ImapConfig(host="imap.example.com"),
+            websocket=WebSocketConfig(enabled=True),
+        )
+        with pytest.raises(ValueError, match="requires --websocket"):
+            select_target(config, "local")
+
+    def test_falls_back_to_imap_without_websocket_port(self):
+        """Test that server names fall back to IMAP when no websocket_port."""
+        config = Config(
+            imap=ImapConfig(host="imap.example.com"),
+            websocket=WebSocketConfig(enabled=True),
+        )
+        target = select_target(config, "outlook.office365.com")
+        assert isinstance(target, ImapTarget)
+
+    def test_select_websocket_for_server_with_port(self, mock_config):
+        """Test that server name with websocket_port selects WebSocketTarget."""
+        target = select_target(mock_config, "imap.example.com", websocket_port=9753)
+        assert isinstance(target, WebSocketTarget)
 
 
 class TestWebSocketTargetWithRawBytes:
     """Test that WebSocketTarget accepts but ignores raw_bytes."""
 
     @pytest.mark.asyncio
-    async def test_copy_email_with_raw_bytes(self):
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-        mock_ws.send_request = AsyncMock(side_effect=[
+    async def test_copy_email_with_raw_bytes(self, mock_config):
+        """Test copy_email accepts raw_bytes parameter."""
+        mock_ws_server = MagicMock()
+        mock_ws_server.send_request = AsyncMock(side_effect=[
             MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
             MagicMock(ok=True, result={}),
         ])
+        mock_ws_server.stop = AsyncMock()
+        mock_task = MagicMock()
 
-        async with WebSocketTarget(mock_ws, "local") as target:
-            # raw_bytes should be accepted but ignored
-            result = await target.copy_email("<msg@example.com>", "Inbox", raw_bytes=b"raw email")
-            assert result is True
+        with patch("mailmap.websocket_server.start_websocket_and_wait", new_callable=AsyncMock) as mock_start:
+            mock_start.return_value = (mock_ws_server, mock_task)
+
+            async with WebSocketTarget(mock_config, "local", 9753) as target:
+                # raw_bytes should be accepted but ignored
+                result = await target.copy_email("<msg@example.com>", "Inbox", raw_bytes=b"raw email")
+                assert result is True
 
     @pytest.mark.asyncio
-    async def test_move_email_with_raw_bytes(self):
-        mock_ws = MagicMock()
-        mock_ws.is_connected = True
-        mock_ws.send_request = AsyncMock(side_effect=[
+    async def test_move_email_with_raw_bytes(self, mock_config):
+        """Test move_email accepts raw_bytes parameter."""
+        mock_ws_server = MagicMock()
+        mock_ws_server.send_request = AsyncMock(side_effect=[
             MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
             MagicMock(ok=True, result={}),
         ])
+        mock_ws_server.stop = AsyncMock()
+        mock_task = MagicMock()
 
-        async with WebSocketTarget(mock_ws, "local") as target:
-            # raw_bytes should be accepted but ignored
-            result = await target.move_email("<msg@example.com>", "Archive", raw_bytes=b"raw email")
-            assert result is True
+        with patch("mailmap.websocket_server.start_websocket_and_wait", new_callable=AsyncMock) as mock_start:
+            mock_start.return_value = (mock_ws_server, mock_task)
+
+            async with WebSocketTarget(mock_config, "local", 9753) as target:
+                # raw_bytes should be accepted but ignored
+                result = await target.move_email("<msg@example.com>", "Archive", raw_bytes=b"raw email")
+                assert result is True
 
 
 class TestImapTargetWithRawBytes:
@@ -244,9 +253,8 @@ class TestImapTargetWithRawBytes:
 
 
 class TestEmailTargetProtocol:
-    def test_websocket_target_implements_protocol(self):
-        mock_ws = MagicMock()
-        target = WebSocketTarget(mock_ws, "local")
+    def test_websocket_target_implements_protocol(self, mock_config):
+        target = WebSocketTarget(mock_config, "local", 9753)
         assert isinstance(target, EmailTargetProtocol)
 
     def test_imap_target_implements_protocol(self):

@@ -8,18 +8,11 @@ Use select_target() to automatically choose the best target based on
 configuration and requirements.
 """
 
-from pathlib import Path
-from typing import TYPE_CHECKING
-
 from mailmap.config import Config
-from mailmap.thunderbird import ThunderbirdReader, find_thunderbird_profile
 
 from .base import EmailTarget
 from .imap import ImapTarget
 from .websocket import WebSocketTarget
-
-if TYPE_CHECKING:
-    from mailmap.websocket_server import WebSocketServer
 
 __all__ = [
     "EmailTarget",
@@ -31,79 +24,48 @@ __all__ = [
 
 def select_target(
     config: Config,
-    ws_server: "WebSocketServer | None" = None,
     target_account: str = "local",
+    websocket_port: int | None = None,
 ) -> EmailTarget:
     """Select the best email target based on configuration.
 
     Selection logic:
-    - For "local": Must use WebSocket (Local Folders only accessible via extension)
-    - For "imap": Use direct IMAP connection
-    - For server hostname with WebSocket: Resolve to account ID via Thunderbird profile
-    - For server hostname without WebSocket: Use direct IMAP connection
+    - "local" with websocket_port: WebSocket target to Thunderbird Local Folders
+    - "local" without websocket_port: Error (requires WebSocket)
+    - "imap": Direct IMAP connection
+    - Other with websocket_port: WebSocket target to that account
+    - Other without websocket_port: Direct IMAP connection
 
     Args:
         config: Application configuration
-        ws_server: Running WebSocket server (or None to use IMAP)
         target_account: Target account:
-            - "local": Thunderbird Local Folders (requires WebSocket)
+            - "local": Thunderbird Local Folders (requires websocket_port)
             - "imap": Direct IMAP connection
-            - Server hostname (e.g., "outlook.office365.com"): Uses WebSocket if available, else IMAP
+            - Server hostname or account ID: Uses WebSocket if port provided, else IMAP
+        websocket_port: Port for WebSocket server (default port: 9753 if None but needed)
 
     Returns:
         An EmailTarget instance (not yet connected)
 
     Raises:
-        ValueError: If target account requires WebSocket but no connection available
+        ValueError: If target account requires WebSocket but not available
     """
-    # Check if WebSocket is available and connected
-    ws_available = ws_server is not None and ws_server.is_connected
-
     # "imap" always uses direct IMAP
     if target_account == "imap":
         return ImapTarget(config.imap)
 
     # "local" requires WebSocket
     if target_account == "local":
-        if not ws_available or ws_server is None:
+        if websocket_port is None:
             raise ValueError(
-                "Target 'local' requires WebSocket connection.\n"
+                "Target 'local' requires --websocket.\n"
                 "Use --websocket to enable, or use --target-account imap for direct IMAP."
             )
+        return WebSocketTarget(config, target_account, websocket_port)
 
-        # Resolve "local" to actual account ID via profile
-        profile_path = None
-        if config.thunderbird.profile_path:
-            profile_path = Path(config.thunderbird.profile_path)
-
-        tb_profile = find_thunderbird_profile(profile_path)
-        if tb_profile:
-            try:
-                reader = ThunderbirdReader(profile_path=tb_profile)
-                account_id = reader.resolve_server_to_account_id("local")
-                return WebSocketTarget(ws_server, account_id)
-            except ValueError:
-                pass  # Fall through to use "local" as-is
-
-        # Fallback: let extension handle "local" (older behavior)
-        return WebSocketTarget(ws_server, "local")
-
-    # Server hostname - use WebSocket if available, else IMAP
-    if ws_available and ws_server is not None:
-        profile_path = None
-        if config.thunderbird.profile_path:
-            profile_path = Path(config.thunderbird.profile_path)
-
-        tb_profile = find_thunderbird_profile(profile_path)
-        if not tb_profile:
-            raise ValueError(
-                f"Cannot resolve server '{target_account}' - no Thunderbird profile found.\n"
-                "Set profile path in config.toml [thunderbird] section."
-            )
-
-        reader = ThunderbirdReader(profile_path=tb_profile)
-        account_id = reader.resolve_server_to_account_id(target_account)
-        return WebSocketTarget(ws_server, account_id)
+    # Other target_account with websocket_port: use WebSocket
+    if websocket_port is not None:
+        return WebSocketTarget(config, target_account, websocket_port)
 
     # No WebSocket - use direct IMAP
     return ImapTarget(config.imap)

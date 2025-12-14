@@ -100,45 +100,75 @@ async def read_email_cmd(
         mailbox.disconnect()
 
 
-def create_folder_cmd(config: Config, folder: str) -> None:
-    """Create a folder on IMAP server.
+async def create_folder_cmd(
+    config: Config,
+    folder: str,
+    target_account: str = "imap",
+    websocket_port: int | None = None,
+) -> None:
+    """Create a folder on target.
 
     Args:
         config: Application configuration
         folder: Folder name to create
+        target_account: Target account: 'local', 'imap', or server name
+        websocket_port: If provided, use WebSocket on this port
     """
-    mailbox = ImapMailbox(config.imap)
-    mailbox.connect()
+    from ..targets import select_target
 
     try:
-        if mailbox.folder_exists(folder):
+        target = select_target(config, target_account, websocket_port)
+    except ValueError as e:
+        logger.error(str(e))
+        return
+
+    async with target:
+        # Check if folder exists first
+        existing = await target.list_folders()
+        if folder in existing:
             logger.info(f"Folder already exists: {folder}")
         else:
-            mailbox.create_folder(folder)
-            logger.info(f"Created folder: {folder}")
-    finally:
-        mailbox.disconnect()
+            success = await target.create_folder(folder)
+            if success:
+                logger.info(f"Created folder: {folder}")
+            else:
+                logger.error(f"Failed to create folder: {folder}")
 
 
-def delete_folder_cmd(config: Config, folder: str) -> None:
-    """Delete a folder from IMAP server.
+async def delete_folder_cmd(
+    config: Config,
+    folder: str,
+    target_account: str = "imap",
+    websocket_port: int | None = None,
+) -> None:
+    """Delete a folder from target.
 
     Args:
         config: Application configuration
         folder: Folder name to delete
+        target_account: Target account: 'local', 'imap', or server name
+        websocket_port: If provided, use WebSocket on this port
     """
-    mailbox = ImapMailbox(config.imap)
-    mailbox.connect()
+    from ..targets import select_target
 
     try:
-        if not mailbox.folder_exists(folder):
+        target = select_target(config, target_account, websocket_port)
+    except ValueError as e:
+        logger.error(str(e))
+        return
+
+    async with target:
+        # Check if folder exists first
+        existing = await target.list_folders()
+        if folder not in existing:
             logger.error(f"Folder does not exist: {folder}")
             return
 
-        mailbox.client.delete_folder(folder)
-        logger.info(f"Deleted folder: {folder}")
-    finally:
-        mailbox.disconnect()
+        success = await target.delete_folder(folder)
+        if success:
+            logger.info(f"Deleted folder: {folder}")
+        else:
+            logger.error(f"Failed to delete folder: {folder}")
 
 
 def move_email_cmd(config: Config, folder: str, uid: int, dest: str) -> None:

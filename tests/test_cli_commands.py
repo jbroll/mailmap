@@ -184,51 +184,67 @@ class TestReadEmailCmd:
 
 
 class TestCreateFolderCmd:
-    def test_create_folder_new(self, config, mock_imap_mailbox):
+    @pytest.mark.asyncio
+    async def test_create_folder_new(self, config):
         """Test creating a new folder."""
-        mock_imap_mailbox.folder_exists.return_value = False
+        mock_target = AsyncMock()
+        mock_target.list_folders = AsyncMock(return_value=["INBOX", "Sent"])
+        mock_target.create_folder = AsyncMock(return_value=True)
+        mock_target.__aenter__ = AsyncMock(return_value=mock_target)
+        mock_target.__aexit__ = AsyncMock(return_value=None)
 
-        create_folder_cmd(config, "NewFolder")
+        with patch("mailmap.targets.select_target", return_value=mock_target):
+            await create_folder_cmd(config, "NewFolder", "imap")
 
-        mock_imap_mailbox.connect.assert_called_once()
-        mock_imap_mailbox.folder_exists.assert_called_once_with("NewFolder")
-        mock_imap_mailbox.create_folder.assert_called_once_with("NewFolder")
-        mock_imap_mailbox.disconnect.assert_called_once()
+        mock_target.list_folders.assert_called_once()
+        mock_target.create_folder.assert_called_once_with("NewFolder")
 
-    def test_create_folder_already_exists(self, config, mock_imap_mailbox):
+    @pytest.mark.asyncio
+    async def test_create_folder_already_exists(self, config):
         """Test creating a folder that already exists."""
-        mock_imap_mailbox.folder_exists.return_value = True
+        mock_target = AsyncMock()
+        mock_target.list_folders = AsyncMock(return_value=["INBOX", "Sent", "ExistingFolder"])
+        mock_target.create_folder = AsyncMock(return_value=True)
+        mock_target.__aenter__ = AsyncMock(return_value=mock_target)
+        mock_target.__aexit__ = AsyncMock(return_value=None)
 
-        create_folder_cmd(config, "ExistingFolder")
+        with patch("mailmap.targets.select_target", return_value=mock_target):
+            await create_folder_cmd(config, "ExistingFolder", "imap")
 
-        mock_imap_mailbox.folder_exists.assert_called_once_with("ExistingFolder")
-        mock_imap_mailbox.create_folder.assert_not_called()
-        mock_imap_mailbox.disconnect.assert_called_once()
+        mock_target.list_folders.assert_called_once()
+        mock_target.create_folder.assert_not_called()
 
 
 class TestDeleteFolderCmd:
-    def test_delete_folder(self, config, mock_imap_mailbox):
+    @pytest.mark.asyncio
+    async def test_delete_folder(self, config):
         """Test deleting a folder."""
-        mock_imap_mailbox.folder_exists.return_value = True
-        mock_imap_mailbox.client = MagicMock()
+        mock_target = AsyncMock()
+        mock_target.list_folders = AsyncMock(return_value=["INBOX", "OldFolder"])
+        mock_target.delete_folder = AsyncMock(return_value=True)
+        mock_target.__aenter__ = AsyncMock(return_value=mock_target)
+        mock_target.__aexit__ = AsyncMock(return_value=None)
 
-        delete_folder_cmd(config, "OldFolder")
+        with patch("mailmap.targets.select_target", return_value=mock_target):
+            await delete_folder_cmd(config, "OldFolder", "imap")
 
-        mock_imap_mailbox.connect.assert_called_once()
-        mock_imap_mailbox.folder_exists.assert_called_once_with("OldFolder")
-        mock_imap_mailbox.client.delete_folder.assert_called_once_with("OldFolder")
-        mock_imap_mailbox.disconnect.assert_called_once()
+        mock_target.list_folders.assert_called_once()
+        mock_target.delete_folder.assert_called_once_with("OldFolder")
 
-    def test_delete_folder_not_found(self, config, mock_imap_mailbox):
+    @pytest.mark.asyncio
+    async def test_delete_folder_not_found(self, config):
         """Test deleting a non-existent folder."""
-        mock_imap_mailbox.folder_exists.return_value = False
-        mock_imap_mailbox.client = MagicMock()
+        mock_target = AsyncMock()
+        mock_target.list_folders = AsyncMock(return_value=["INBOX", "Sent"])
+        mock_target.delete_folder = AsyncMock(return_value=True)
+        mock_target.__aenter__ = AsyncMock(return_value=mock_target)
+        mock_target.__aexit__ = AsyncMock(return_value=None)
 
-        delete_folder_cmd(config, "NonExistent")
+        with patch("mailmap.targets.select_target", return_value=mock_target):
+            await delete_folder_cmd(config, "NonExistent", "imap")
 
-        mock_imap_mailbox.folder_exists.assert_called_once_with("NonExistent")
-        mock_imap_mailbox.client.delete_folder.assert_not_called()
-        mock_imap_mailbox.disconnect.assert_called_once()
+        mock_target.list_folders.assert_called_once()
+        mock_target.delete_folder.assert_not_called()
 
 
 class TestMoveEmailCmd:

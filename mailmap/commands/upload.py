@@ -1,4 +1,4 @@
-"""Upload and cleanup commands - IMAP upload and Thunderbird folder cleanup."""
+"""Upload and cleanup commands - IMAP upload and folder cleanup."""
 
 from __future__ import annotations
 
@@ -131,7 +131,6 @@ async def cleanup_folders(
         websocket_port: If provided, use WebSocket on this port
     """
     from ..targets import select_target
-    from ..websocket_server import start_websocket_and_wait
 
     # Load category names from categories.txt
     categories = load_categories(config.database.categories_file)
@@ -143,72 +142,42 @@ async def cleanup_folders(
 
     logger.info(f"Will check for {len(category_names)} category folders in {target_account}")
 
-    ws_server = None
-    server_task = None
-
+    # Select and connect to target
     try:
-        # Start WebSocket server if needed for 'local' target
-        if target_account == "local" and websocket_port is not None:
-            from ..config import WebSocketConfig
+        target = select_target(config, target_account, websocket_port)
+    except ValueError as e:
+        logger.error(str(e))
+        return
 
-            ws_config = WebSocketConfig(
-                enabled=True,
-                host="localhost",
-                port=websocket_port,
-                auth_token=config.websocket.auth_token if config.websocket else "",
-            )
+    async with target:
+        logger.info(f"Using {target.target_type} target")
 
-            result = await start_websocket_and_wait(
-                ws_config, db, config.database.categories_file, timeout=30
-            )
-            if result is None:
-                return
-            ws_server, server_task = result
-        elif target_account == "local":
-            logger.error("Target 'local' requires --websocket. Use --target-account imap for direct IMAP.")
+        # List folders on target
+        existing_folders = await target.list_folders()
+
+        # Find folders that match category names
+        folders_to_delete = [f for f in existing_folders if f in category_names]
+
+        if not folders_to_delete:
+            logger.info("No classification folders found to delete")
             return
 
-        # Select target
-        try:
-            target = select_target(config, ws_server, target_account)
-            logger.info(f"Using {target.target_type} target")
-        except ValueError as e:
-            logger.error(str(e))
-            return
+        logger.info(f"Found {len(folders_to_delete)} classification folders to delete")
 
-        async with target:
-            # List folders on target
-            existing_folders = await target.list_folders()
+        # Delete each folder
+        deleted = 0
+        failed = 0
 
-            # Find folders that match category names
-            folders_to_delete = [f for f in existing_folders if f in category_names]
+        for folder_name in sorted(folders_to_delete):
+            success = await target.delete_folder(folder_name)
+            if success:
+                logger.info(f"  Deleted: {folder_name}")
+                deleted += 1
+            else:
+                logger.warning(f"  Failed to delete: {folder_name}")
+                failed += 1
 
-            if not folders_to_delete:
-                logger.info("No classification folders found to delete")
-                return
-
-            logger.info(f"Found {len(folders_to_delete)} classification folders to delete")
-
-            # Delete each folder
-            deleted = 0
-            failed = 0
-
-            for folder_name in sorted(folders_to_delete):
-                success = await target.delete_folder(folder_name)
-                if success:
-                    logger.info(f"  Deleted: {folder_name}")
-                    deleted += 1
-                else:
-                    logger.warning(f"  Failed to delete: {folder_name}")
-                    failed += 1
-
-            logger.info(f"Cleanup complete: {deleted} deleted, {failed} failed")
-
-    finally:
-        if ws_server:
-            await ws_server.stop()
-        if server_task:
-            server_task.cancel()
+        logger.info(f"Cleanup complete: {deleted} deleted, {failed} failed")
 
 
 # Keep old name for backwards compatibility
