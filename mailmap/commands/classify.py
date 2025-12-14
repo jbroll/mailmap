@@ -24,6 +24,7 @@ async def bulk_classify(
     config: Config,
     db: Database,
     ws_server: WebSocketServer | None = None,
+    copy: bool = False,
     move: bool = False,
     target_account: str = "local",
     min_confidence: float = 0.5,
@@ -37,7 +38,8 @@ async def bulk_classify(
         config: Application configuration
         db: Database instance
         ws_server: Optional WebSocket server for copy/move operations
-        move: If True with target, move messages; otherwise copy
+        copy: If True with target, copy messages to target folders
+        move: If True with target, move messages to target folders
         target_account: Target account for folders: 'local', 'imap', or account ID
         min_confidence: Minimum confidence to copy/move (below this goes to Unknown)
 
@@ -72,13 +74,21 @@ async def bulk_classify(
 
     # Select target if copy/move requested
     target = None
-    if ws_server:
+    if ws_server or ((copy or move) and target_account == "imap"):
         try:
             target = select_target(config, ws_server, target_account)
             logger.info(f"Using {target.target_type} target (account: {target_account})")
         except ValueError as e:
             logger.error(str(e))
             return classifications
+
+    # Error if copy/move requested but no target available
+    if (copy or move) and target is None:
+        logger.error(
+            f"No target available for {'move' if move else 'copy'}. "
+            f"Use --target-account imap or --websocket."
+        )
+        return classifications
 
     # Load spam rules
     spam_rules = parse_rules(config.spam.rules) if config.spam.enabled else []
@@ -307,7 +317,7 @@ async def run_bulk_classify(
 
         # Use the new abstraction-based classify function
         await bulk_classify(
-            config, db, ws_server=ws_server, move=move, target_account=target_account
+            config, db, ws_server=ws_server, copy=copy, move=move, target_account=target_account
         )
 
     finally:
