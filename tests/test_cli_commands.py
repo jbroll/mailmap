@@ -4,10 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mailmap.config import Config, DatabaseConfig, ImapConfig, OllamaConfig, ThunderbirdConfig
-from mailmap.email import UnifiedEmail
-from mailmap.imap_client import EmailMessage
-from mailmap.main import (
+from mailmap.commands.imap_ops import (
     copy_email_cmd,
     create_folder_cmd,
     delete_folder_cmd,
@@ -16,6 +13,9 @@ from mailmap.main import (
     move_email_cmd,
     read_email_cmd,
 )
+from mailmap.config import Config, DatabaseConfig, ImapConfig, OllamaConfig, ThunderbirdConfig
+from mailmap.email import UnifiedEmail
+from mailmap.imap_client import EmailMessage
 
 
 @pytest.fixture
