@@ -43,8 +43,11 @@ mailmap classify --folder outlook.office365.com:INBOX --limit 50
 # Classify and copy to Thunderbird Local Folders (via extension)
 mailmap classify --folder INBOX --limit 50 --copy --target-account local
 
-# Classify and move to IMAP folders (via extension)
-mailmap classify --folder INBOX --limit 50 --move --target-account imap
+# Classify and move to IMAP server folders (via extension)
+mailmap classify --folder INBOX --limit 50 --move --target-account outlook.office365.com
+
+# Force reading directly from IMAP instead of Thunderbird cache
+mailmap classify --source-type imap --limit 100
 
 # Analyze emails and suggest new folder structure (saves to categories.txt)
 mailmap init --limit 500
@@ -72,8 +75,8 @@ mailmap clear --folder INBOX          # Only specific source folder
 mailmap reset
 
 # Delete classification folders from Thunderbird (via extension)
-mailmap cleanup                        # Delete from Local Folders
-mailmap cleanup --target-account imap  # Delete from IMAP account
+mailmap cleanup                                            # Delete from Local Folders
+mailmap cleanup --target-account outlook.office365.com     # Delete from IMAP account
 ```
 
 ## Typical Workflow
@@ -112,6 +115,7 @@ Thunderbird subcommands (learn/classify/init) also support:
 --folder SPEC          # Process only this folder (e.g., INBOX or server:INBOX)
 --limit N              # Max emails (integer) or percentage (0.1 = 10%)
 --random               # Randomly sample instead of sequential
+--source-type TYPE     # Email source: 'thunderbird' (local cache) or 'imap' (direct)
 ```
 
 Note: If a folder name exists in multiple accounts, use `server:folder` syntax
@@ -121,7 +125,7 @@ Classify command also supports (requires Thunderbird extension):
 ```bash
 --copy                 # Copy classified emails to target folders
 --move                 # Move classified emails to target folders
---target-account TYPE  # Target: 'local' (default), 'imap', or account ID
+--target-account DEST  # Target: 'local' (default) or server name (e.g., outlook.office365.com)
 ```
 
 ## Testing
