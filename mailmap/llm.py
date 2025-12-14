@@ -257,12 +257,14 @@ class OllamaClient:
         )
 
         response_text = await self._generate(prompt)
+        logger.debug(f"LLM response: {response_text[:500]}")
 
         predicted_folder: str = fallback_folder or "INBOX"
         secondary_labels: list[str] = []
         confidence = 0.0
 
         data = self._parse_json(response_text)
+        logger.debug(f"Parsed data: {data}")
         if isinstance(data, dict):
             predicted_folder = data.get("predicted_folder", fallback_folder) or "INBOX"
             secondary_labels = data.get("secondary_labels", []) or []

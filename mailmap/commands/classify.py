@@ -59,6 +59,7 @@ async def bulk_classify(
     move: bool = False,
     target_account: str = "local",
     min_confidence: float = 0.5,
+    force: bool = False,
 ) -> list[tuple[str, str]]:
     """Bulk classify emails using source/target abstractions.
 
@@ -73,6 +74,7 @@ async def bulk_classify(
         move: If True with target, move messages to target folders
         target_account: Target account for folders: 'local', 'imap', or account ID
         min_confidence: Minimum confidence to copy/move (below this goes to Unknown)
+        force: If True, re-classify emails even if already in database
 
     Returns:
         List of (message_id, classification) tuples for successfully classified emails.
@@ -181,9 +183,9 @@ async def bulk_classify(
                     random_sample = tb_config.random_sample
 
                     async for email in source.read_emails(folder_spec, limit, random_sample):
-                        # Check if already processed
+                        # Check if already processed (skip unless --force)
                         existing = db.get_email(email.message_id)
-                        if existing:
+                        if existing and not force:
                             continue
 
                         # Check for spam (if headers available)
@@ -303,6 +305,7 @@ async def run_bulk_classify(
     move: bool = False,
     target_account: str = "local",
     websocket_port: int | None = None,
+    force: bool = False,
 ) -> None:
     """Run bulk classification mode.
 
@@ -313,6 +316,7 @@ async def run_bulk_classify(
         move: If True, move classified emails to target folders
         target_account: Target account for folders: 'local', 'imap', or account ID
         websocket_port: If provided, use WebSocket on this port (requires Thunderbird extension)
+        force: If True, re-classify emails even if already processed
     """
     from ..config import WebSocketConfig
     from ..websocket_server import start_websocket_and_wait
@@ -351,7 +355,7 @@ async def run_bulk_classify(
 
         # Use the new abstraction-based classify function
         await bulk_classify(
-            config, db, ws_server=ws_server, copy=copy, move=move, target_account=target_account
+            config, db, ws_server=ws_server, copy=copy, move=move, target_account=target_account, force=force
         )
 
     finally:

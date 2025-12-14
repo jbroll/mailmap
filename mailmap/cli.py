@@ -48,6 +48,11 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Path to configuration file",
     )
     parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable debug logging",
+    )
+    parser.add_argument(
         "--db-path",
         type=str,
         help="Override database path",
@@ -163,6 +168,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--move",
         action="store_true",
         help="Move classified emails to target folders via Thunderbird extension",
+    )
+    classify_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-classify emails even if already processed",
     )
     add_target_args(classify_parser)
 
@@ -299,6 +309,10 @@ def main() -> None:
         logger.error(f"Configuration file not found: {args.config}")
         sys.exit(1)
 
+    # Set debug logging if verbose
+    if getattr(args, "verbose", False):
+        logging.getLogger("mailmap").setLevel(logging.DEBUG)
+
     config = load_config(args.config)
     config = apply_cli_overrides(config, args)
 
@@ -350,7 +364,8 @@ def _run_command(args, config: Config, db: Database) -> None:
         move_mode = getattr(args, "move", False)
         target_account = getattr(args, "target_account", "local")
         websocket_port = getattr(args, "websocket", None)
-        asyncio.run(run_bulk_classify(config, db, copy=copy_mode, move=move_mode, target_account=target_account, websocket_port=websocket_port))
+        force = getattr(args, "force", False)
+        asyncio.run(run_bulk_classify(config, db, copy=copy_mode, move=move_mode, target_account=target_account, websocket_port=websocket_port, force=force))
     elif args.command == "upload":
         dry_run = getattr(args, "dry_run", False)
         folder_filter = getattr(args, "upload_folder", None)
