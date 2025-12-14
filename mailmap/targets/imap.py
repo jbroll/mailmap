@@ -27,6 +27,7 @@ class ImapTarget:
         """
         self._config = config
         self._mailbox: ImapMailbox | None = None
+        self._ensured_folders: set[str] = set()  # Cache of folders we've ensured exist
 
     @property
     def target_type(self) -> str:
@@ -112,12 +113,14 @@ class ImapTarget:
 
         loop = asyncio.get_event_loop()
 
-        # Ensure target folder exists
-        await loop.run_in_executor(
-            None,
-            self._mailbox.ensure_folder,
-            target_folder,
-        )
+        # Ensure target folder exists (cached to avoid redundant calls)
+        if target_folder not in self._ensured_folders:
+            await loop.run_in_executor(
+                None,
+                self._mailbox.ensure_folder,
+                target_folder,
+            )
+            self._ensured_folders.add(target_folder)
 
         # Use provided raw bytes or search for email on server
         raw_email = raw_bytes
@@ -162,12 +165,14 @@ class ImapTarget:
 
         loop = asyncio.get_event_loop()
 
-        # Ensure target folder exists
-        await loop.run_in_executor(
-            None,
-            self._mailbox.ensure_folder,
-            target_folder,
-        )
+        # Ensure target folder exists (cached to avoid redundant calls)
+        if target_folder not in self._ensured_folders:
+            await loop.run_in_executor(
+                None,
+                self._mailbox.ensure_folder,
+                target_folder,
+            )
+            self._ensured_folders.add(target_folder)
 
         # If raw bytes provided, upload directly (cross-server transfer)
         if raw_bytes is not None:

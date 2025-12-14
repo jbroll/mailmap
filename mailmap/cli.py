@@ -174,6 +174,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Re-classify emails even if already processed",
     )
+    classify_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Process N emails concurrently (default: 1)",
+    )
     add_target_args(classify_parser)
 
     # init - Initialize folder structure
@@ -365,7 +372,11 @@ def _run_command(args, config: Config, db: Database) -> None:
         target_account = getattr(args, "target_account", "local")
         websocket_port = getattr(args, "websocket", None)
         force = getattr(args, "force", False)
-        asyncio.run(run_bulk_classify(config, db, copy=copy_mode, move=move_mode, target_account=target_account, websocket_port=websocket_port, force=force))
+        concurrency = getattr(args, "concurrency", 1)
+        asyncio.run(run_bulk_classify(
+            config, db, copy=copy_mode, move=move_mode, target_account=target_account,
+            websocket_port=websocket_port, force=force, concurrency=concurrency
+        ))
     elif args.command == "upload":
         dry_run = getattr(args, "dry_run", False)
         folder_filter = getattr(args, "upload_folder", None)

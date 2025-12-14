@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,11 +17,29 @@ from ..email import UnifiedEmail
 from ..llm import OllamaClient
 from ..mbox import get_raw_email
 from ..spam import is_spam, parse_rules
+from ..targets.base import EmailTarget
 
 if TYPE_CHECKING:
     from ..websocket_server import WebSocketServer
 
 logger = logging.getLogger("mailmap")
+
+
+@dataclass
+class ProcessingStats:
+    """Thread-safe stats for concurrent processing."""
+
+    imported: int = 0
+    classified: int = 0
+    copied: int = 0
+    failed: int = 0
+    spam: int = 0
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    async def increment(self, **kwargs: int) -> None:
+        async with self._lock:
+            for key, value in kwargs.items():
+                setattr(self, key, getattr(self, key) + value)
 
 
 async def _get_raw_bytes(email: UnifiedEmail) -> bytes | None:
@@ -51,6 +70,78 @@ async def _get_raw_bytes(email: UnifiedEmail) -> bytes | None:
     return None
 
 
+async def _process_single_email(
+    email: UnifiedEmail,
+    folder_name: str,
+    llm: OllamaClient,
+    db: Database,
+    target: EmailTarget | None,
+    folder_descriptions: dict[str, str],
+    min_confidence: float,
+    move: bool,
+    stats: ProcessingStats,
+    semaphore: asyncio.Semaphore,
+) -> tuple[str, str] | None:
+    """Process a single email with semaphore-limited concurrency.
+
+    Returns:
+        (message_id, classification) tuple if successful, None otherwise.
+    """
+    async with semaphore:
+        action_past = "moved" if move else "copied"
+
+        try:
+            # Classify email
+            result = await llm.classify_email(
+                email.subject,
+                email.from_addr,
+                email.body_text,
+                folder_descriptions,
+            )
+            db.update_classification(
+                email.message_id,
+                result.predicted_folder,
+                result.confidence,
+            )
+            await stats.increment(classified=1)
+
+            # Copy/move if target available
+            if target:
+                target_folder = (
+                    result.predicted_folder
+                    if result.confidence >= min_confidence
+                    else "Unknown"
+                )
+
+                # Get raw bytes for cross-server transfers
+                raw_bytes = await _get_raw_bytes(email)
+
+                if move:
+                    success = await target.move_email(email.message_id, target_folder, raw_bytes)
+                else:
+                    success = await target.copy_email(email.message_id, target_folder, raw_bytes)
+
+                if success:
+                    await stats.increment(copied=1)
+                    conf_str = (
+                        f" ({result.confidence:.0%})"
+                        if target_folder != "Unknown"
+                        else f" (low: {result.confidence:.0%})"
+                    )
+                    logger.info(
+                        f"  {action_past}: {email.subject[:40]}... -> {target_folder}{conf_str}"
+                    )
+                else:
+                    await stats.increment(failed=1)
+                    logger.warning(f"  Failed to {action_past}: {email.message_id}")
+
+            return (email.message_id, result.predicted_folder)
+
+        except Exception as e:
+            logger.warning(f"Failed to classify {email.message_id}: {e}")
+            return None
+
+
 async def bulk_classify(
     config: Config,
     db: Database,
@@ -60,6 +151,7 @@ async def bulk_classify(
     target_account: str = "local",
     min_confidence: float = 0.5,
     force: bool = False,
+    concurrency: int = 1,
 ) -> list[tuple[str, str]]:
     """Bulk classify emails using source/target abstractions.
 
@@ -75,6 +167,7 @@ async def bulk_classify(
         target_account: Target account for folders: 'local', 'imap', or account ID
         min_confidence: Minimum confidence to copy/move (below this goes to Unknown)
         force: If True, re-classify emails even if already in database
+        concurrency: Number of emails to process concurrently (default: 1)
 
     Returns:
         List of (message_id, classification) tuples for successfully classified emails.
@@ -126,15 +219,13 @@ async def bulk_classify(
     # Load spam rules
     spam_rules = parse_rules(config.spam.rules) if config.spam.enabled else []
 
-    total_imported = 0
-    total_classified = 0
-    total_copied = 0
-    total_failed = 0
-    total_spam = 0
-
-    action_verb = "Moving" if move else "Copying"
+    stats = ProcessingStats()
     action_past = "moved" if move else "copied"
     start_time = time.time()
+    semaphore = asyncio.Semaphore(concurrency)
+
+    if concurrency > 1:
+        logger.info(f"Using {concurrency} concurrent workers")
 
     try:
         async with source, OllamaClient(config.ollama) as llm:
@@ -176,11 +267,13 @@ async def bulk_classify(
                         continue
 
                     logger.info(f"Processing folder: {folder_spec}")
-                    folder_count = 0
 
                     # Read emails from source
                     limit = int(tb_config.import_limit) if isinstance(tb_config.import_limit, (int, float)) else None
                     random_sample = tb_config.random_sample
+
+                    # Collect emails to process
+                    emails_to_process: list[tuple[UnifiedEmail, str]] = []
 
                     async for email in source.read_emails(folder_spec, limit, random_sample):
                         # Check if already processed (skip unless --force)
@@ -205,10 +298,10 @@ async def bulk_classify(
                                 processed_at=datetime.now(),
                             )
                             db.insert_email(email_record)
-                            total_spam += 1
+                            stats.spam += 1
                             continue
 
-                        # Import email
+                        # Import email to database
                         email_record = Email(
                             message_id=email.message_id,
                             folder_id=folder_name,
@@ -218,65 +311,41 @@ async def bulk_classify(
                             processed_at=datetime.now(),
                         )
                         db.insert_email(email_record)
-                        total_imported += 1
-                        folder_count += 1
+                        stats.imported += 1
+                        emails_to_process.append((email, folder_name))
 
-                        # Classify email
-                        try:
-                            result = await llm.classify_email(
-                                email.subject,
-                                email.from_addr,
-                                email.body_text,
-                                folder_descriptions,
-                            )
-                            db.update_classification(
-                                email.message_id,
-                                result.predicted_folder,
-                                result.confidence,
-                            )
-                            classifications.append((email.message_id, result.predicted_folder))
-                            total_classified += 1
+                    if not emails_to_process:
+                        logger.info(f"  No new emails to process in {folder_name}")
+                        continue
 
-                            # Log progress every 10 emails
-                            if total_classified % 10 == 0:
-                                elapsed = time.time() - start_time
-                                rate = total_classified / elapsed if elapsed > 0 else 0
-                                logger.info(f"  Progress: {total_classified} classified, {rate:.1f} emails/sec")
+                    logger.info(f"  Classifying {len(emails_to_process)} emails...")
 
-                            # Copy/move if target available
-                            if target:
-                                target_folder = (
-                                    result.predicted_folder
-                                    if result.confidence >= min_confidence
-                                    else "Unknown"
-                                )
+                    # Process emails concurrently
+                    tasks = [
+                        _process_single_email(
+                            email=email,
+                            folder_name=fname,
+                            llm=llm,
+                            db=db,
+                            target=target,
+                            folder_descriptions=folder_descriptions,
+                            min_confidence=min_confidence,
+                            move=move,
+                            stats=stats,
+                            semaphore=semaphore,
+                        )
+                        for email, fname in emails_to_process
+                    ]
 
-                                # Get raw bytes for cross-server transfers
-                                raw_bytes = await _get_raw_bytes(email)
+                    # Run with progress reporting
+                    results = await asyncio.gather(*tasks)
 
-                                if move:
-                                    success = await target.move_email(email.message_id, target_folder, raw_bytes)
-                                else:
-                                    success = await target.copy_email(email.message_id, target_folder, raw_bytes)
+                    # Collect successful classifications
+                    for result in results:
+                        if result:
+                            classifications.append(result)
 
-                                if success:
-                                    total_copied += 1
-                                    conf_str = (
-                                        f" ({result.confidence:.0%})"
-                                        if target_folder != "Unknown"
-                                        else f" (low: {result.confidence:.0%})"
-                                    )
-                                    logger.info(
-                                        f"  {action_past}: {email.subject[:40]}... -> {target_folder}{conf_str}"
-                                    )
-                                else:
-                                    total_failed += 1
-                                    logger.warning(f"  Failed to {action_verb.lower()}: {email.message_id}")
-
-                        except Exception as e:
-                            logger.warning(f"Failed to classify {email.message_id}: {e}")
-
-                    logger.info(f"  Processed {folder_count} emails from {folder_name}")
+                    logger.info(f"  Processed {len(emails_to_process)} emails from {folder_name}")
 
             finally:
                 if target:
@@ -287,13 +356,13 @@ async def bulk_classify(
         raise
 
     elapsed = time.time() - start_time
-    rate = total_classified / elapsed if elapsed > 0 else 0
+    rate = stats.classified / elapsed if elapsed > 0 else 0
     logger.info(
-        f"Classification complete: {total_imported} imported, {total_classified} classified, {total_spam} spam"
+        f"Classification complete: {stats.imported} imported, {stats.classified} classified, {stats.spam} spam"
     )
     logger.info(f"Elapsed time: {elapsed:.1f}s, rate: {rate:.2f} emails/sec")
     if target:
-        logger.info(f"Target actions: {total_copied} {action_past}, {total_failed} failed")
+        logger.info(f"Target actions: {stats.copied} {action_past}, {stats.failed} failed")
 
     return classifications
 
@@ -306,6 +375,7 @@ async def run_bulk_classify(
     target_account: str = "local",
     websocket_port: int | None = None,
     force: bool = False,
+    concurrency: int = 1,
 ) -> None:
     """Run bulk classification mode.
 
@@ -317,6 +387,7 @@ async def run_bulk_classify(
         target_account: Target account for folders: 'local', 'imap', or account ID
         websocket_port: If provided, use WebSocket on this port (requires Thunderbird extension)
         force: If True, re-classify emails even if already processed
+        concurrency: Number of emails to process concurrently (default: 1)
     """
     from ..config import WebSocketConfig
     from ..websocket_server import start_websocket_and_wait
@@ -355,7 +426,8 @@ async def run_bulk_classify(
 
         # Use the new abstraction-based classify function
         await bulk_classify(
-            config, db, ws_server=ws_server, copy=copy, move=move, target_account=target_account, force=force
+            config, db, ws_server=ws_server, copy=copy, move=move,
+            target_account=target_account, force=force, concurrency=concurrency
         )
 
     finally:
