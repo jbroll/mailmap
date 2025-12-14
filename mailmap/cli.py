@@ -28,6 +28,7 @@ from .commands import (
     run_learn_folders,
     summary_cmd,
     sync_transfers,
+    transfer_emails,
     upload_to_imap,
 )
 from .config import Config, load_config
@@ -247,6 +248,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show what would be synced without making changes",
     )
 
+    # transfer - Transfer pre-classified emails to IMAP
+    transfer_parser = subparsers.add_parser(
+        "transfer", help="Transfer pre-classified emails to IMAP folders (rate-limited)"
+    )
+    add_common_args(transfer_parser)
+    transfer_parser.add_argument(
+        "--move",
+        action="store_true",
+        help="Move instead of copy",
+    )
+    transfer_parser.add_argument(
+        "--rate-limit",
+        type=float,
+        default=1.0,
+        metavar="SECS",
+        help="Minimum seconds between IMAP operations (default: 1.0)",
+    )
+
     # cleanup - Delete classification folders
     cleanup_parser = subparsers.add_parser(
         "cleanup", help="Delete classification folders from target (IMAP or Thunderbird)"
@@ -428,6 +447,10 @@ def _run_command(args, config: Config, db: Database) -> None:
     elif args.command == "sync":
         dry_run = getattr(args, "dry_run", False)
         sync_transfers(config, db, dry_run=dry_run)
+    elif args.command == "transfer":
+        move_mode = getattr(args, "move", False)
+        rate_limit = getattr(args, "rate_limit", 1.0)
+        asyncio.run(transfer_emails(config, db, move=move_mode, rate_limit=rate_limit))
 
 
 if __name__ == "__main__":

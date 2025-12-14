@@ -1,6 +1,6 @@
 """Command implementations for mailmap CLI."""
 
-from .classify import bulk_classify, run_bulk_classify
+from .classify import bulk_classify, run_bulk_classify, transfer_emails
 from .daemon import EmailProcessor, run_daemon, run_listener
 from .imap_ops import (
     copy_email_cmd,
@@ -28,6 +28,7 @@ __all__ = [
     # classify
     "bulk_classify",
     "run_bulk_classify",
+    "transfer_emails",
     # daemon
     "EmailProcessor",
     "run_daemon",

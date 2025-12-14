@@ -71,6 +71,64 @@ async def _get_raw_bytes(email: UnifiedEmail) -> bytes | None:
     return None
 
 
+async def _transfer_single_email(
+    email_record: Email,
+    target: EmailTarget,
+    db: Database,
+    move: bool,
+    stats: ProcessingStats,
+    rate_limit: float = 1.0,
+) -> bool:
+    """Transfer a pre-classified email to its destination folder with rate limiting.
+
+    Args:
+        email_record: Email record from database with classification
+        target: Target to transfer to
+        db: Database instance
+        move: If True, move instead of copy
+        stats: Stats tracker
+        rate_limit: Minimum seconds between transfers (default: 1.0)
+
+    Returns:
+        True if transfer succeeded, False otherwise.
+    """
+    action_past = "moved" if move else "copied"
+    start_time = time.time()
+
+    try:
+        target_folder = email_record.classification or "Unknown"
+
+        # For pre-classified emails, we don't have raw bytes readily available
+        # The target will need to find the email on the server
+        if move:
+            success = await target.move_email(email_record.message_id, target_folder, None)
+        else:
+            success = await target.copy_email(email_record.message_id, target_folder, None)
+
+        elapsed = time.time() - start_time
+
+        if success:
+            await stats.increment(copied=1)
+            db.mark_as_transferred(email_record.message_id)
+            logger.info(
+                f"  {action_past}: {email_record.subject[:40]}... -> {target_folder} [{elapsed:.1f}s]"
+            )
+        else:
+            await stats.increment(failed=1)
+            logger.warning(f"  Failed to {action_past}: {email_record.message_id}")
+
+        # Rate limiting - ensure minimum time between operations
+        if elapsed < rate_limit:
+            await asyncio.sleep(rate_limit - elapsed)
+
+        return success
+
+    except Exception as e:
+        await stats.increment(failed=1)
+        logger.warning(f"Failed to transfer {email_record.message_id}: {e}")
+        return False
+
+
 async def _process_single_email(
     email: UnifiedEmail,
     folder_name: str,
@@ -417,5 +475,66 @@ async def run_bulk_classify(
             force=force,
             concurrency=concurrency
         )
+    finally:
+        db.close()
+
+
+async def transfer_emails(
+    config: Config,
+    db: Database,
+    move: bool = False,
+    rate_limit: float = 1.0,
+) -> int:
+    """Transfer pre-classified emails to their destination IMAP folders.
+
+    Processes emails that are classified but not yet transferred,
+    with rate limiting to avoid overwhelming the IMAP server.
+
+    Args:
+        config: Application configuration
+        db: Database instance
+        move: If True, move instead of copy
+        rate_limit: Minimum seconds between IMAP operations (default: 1.0)
+
+    Returns:
+        Number of emails successfully transferred.
+    """
+    from ..targets import ImapTarget
+
+    db.connect()
+    db.init_schema()
+
+    try:
+        # Get untransferred emails
+        untransferred = db.get_untransferred_emails()
+        if not untransferred:
+            logger.info("No untransferred emails found")
+            return 0
+
+        logger.info(f"Found {len(untransferred)} classified but untransferred emails")
+        logger.info(f"Rate limit: {rate_limit:.1f}s between operations")
+
+        target = ImapTarget(config.imap)
+        stats = ProcessingStats()
+        start_time = time.time()
+
+        async with target:
+            for i, email_record in enumerate(untransferred, 1):
+                logger.info(f"[{i}/{len(untransferred)}] {email_record.subject[:50]}...")
+                await _transfer_single_email(
+                    email_record=email_record,
+                    target=target,
+                    db=db,
+                    move=move,
+                    stats=stats,
+                    rate_limit=rate_limit,
+                )
+
+        elapsed = time.time() - start_time
+        logger.info(f"Transfer complete: {stats.copied} transferred, {stats.failed} failed")
+        logger.info(f"Elapsed time: {elapsed:.1f}s")
+
+        return stats.copied
+
     finally:
         db.close()
