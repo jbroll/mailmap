@@ -169,6 +169,80 @@ class TestSelectTarget:
         assert isinstance(target, ImapTarget)
 
 
+class TestWebSocketTargetWithRawBytes:
+    """Test that WebSocketTarget accepts but ignores raw_bytes."""
+
+    @pytest.mark.asyncio
+    async def test_copy_email_with_raw_bytes(self):
+        mock_ws = MagicMock()
+        mock_ws.is_connected = True
+        mock_ws.send_request = AsyncMock(side_effect=[
+            MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
+            MagicMock(ok=True, result={}),
+        ])
+
+        async with WebSocketTarget(mock_ws, "local") as target:
+            # raw_bytes should be accepted but ignored
+            result = await target.copy_email("<msg@example.com>", "Inbox", raw_bytes=b"raw email")
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_move_email_with_raw_bytes(self):
+        mock_ws = MagicMock()
+        mock_ws.is_connected = True
+        mock_ws.send_request = AsyncMock(side_effect=[
+            MagicMock(ok=True, result={"accounts": [{"id": "acc1", "type": "none"}]}),
+            MagicMock(ok=True, result={}),
+        ])
+
+        async with WebSocketTarget(mock_ws, "local") as target:
+            # raw_bytes should be accepted but ignored
+            result = await target.move_email("<msg@example.com>", "Archive", raw_bytes=b"raw email")
+            assert result is True
+
+
+class TestImapTargetWithRawBytes:
+    """Test ImapTarget copy/move with raw_bytes for cross-server transfers."""
+
+    @pytest.mark.asyncio
+    async def test_copy_email_with_raw_bytes_uploads_directly(self):
+        """Test that copy_email uploads raw_bytes directly without searching."""
+        config = ImapConfig(host="imap.example.com")
+        target = ImapTarget(config)
+
+        # Mock the mailbox
+        mock_mailbox = MagicMock()
+        mock_mailbox.ensure_folder = MagicMock()
+        mock_mailbox.append_email = MagicMock()
+        target._mailbox = mock_mailbox
+
+        raw_content = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
+        result = await target.copy_email("<msg@example.com>", "Inbox", raw_bytes=raw_content)
+
+        assert result is True
+        mock_mailbox.ensure_folder.assert_called_once_with("Inbox")
+        mock_mailbox.append_email.assert_called_once_with("Inbox", raw_content)
+
+    @pytest.mark.asyncio
+    async def test_move_email_with_raw_bytes_uploads_directly(self):
+        """Test that move_email uploads raw_bytes directly without searching."""
+        config = ImapConfig(host="imap.example.com")
+        target = ImapTarget(config)
+
+        # Mock the mailbox
+        mock_mailbox = MagicMock()
+        mock_mailbox.ensure_folder = MagicMock()
+        mock_mailbox.append_email = MagicMock()
+        target._mailbox = mock_mailbox
+
+        raw_content = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
+        result = await target.move_email("<msg@example.com>", "Archive", raw_bytes=raw_content)
+
+        assert result is True
+        mock_mailbox.ensure_folder.assert_called_once_with("Archive")
+        mock_mailbox.append_email.assert_called_once_with("Archive", raw_content)
+
+
 class TestEmailTargetProtocol:
     def test_websocket_target_implements_protocol(self):
         mock_ws = MagicMock()
