@@ -37,7 +37,7 @@ def config():
 @pytest.fixture
 def mock_imap_mailbox():
     """Create a mock ImapMailbox."""
-    with patch("mailmap.main.ImapMailbox") as mock_class:
+    with patch("mailmap.commands.imap_ops.ImapMailbox") as mock_class:
         mock_instance = MagicMock()
         mock_class.return_value = mock_instance
         yield mock_instance
