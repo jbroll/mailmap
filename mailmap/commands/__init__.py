@@ -13,7 +13,7 @@ from .imap_ops import (
 )
 from .init import init_folders_from_samples, run_init_folders
 from .learn import learn_from_existing_folders, run_learn_folders
-from .upload import cleanup_thunderbird_folders, upload_to_imap
+from .upload import cleanup_folders, cleanup_thunderbird_folders, upload_to_imap
 from .utils import (
     apply_cli_overrides,
     clear_cmd,
@@ -46,6 +46,7 @@ __all__ = [
     "learn_from_existing_folders",
     "run_learn_folders",
     # upload
+    "cleanup_folders",
     "cleanup_thunderbird_folders",
     "upload_to_imap",
     # utils

@@ -114,21 +114,23 @@ def upload_to_imap(
         db.close()
 
 
-async def cleanup_thunderbird_folders(
+async def cleanup_folders(
     config: Config,
     db: Database,
     target_account: str = "local",
+    websocket_port: int | None = None,
 ) -> None:
-    """Delete classification folders from Thunderbird via extension.
+    """Delete classification folders from target.
 
-    Queries Thunderbird for folders matching category names and deletes them.
+    Queries the target for folders matching category names and deletes them.
 
     Args:
         config: Application configuration
         db: Database instance (unused but kept for API consistency)
-        target_account: Target account: 'local', 'imap', or account ID
+        target_account: Target account: 'local', 'imap', or server name
+        websocket_port: If provided, use WebSocket on this port
     """
-    from ..protocol import Action
+    from ..targets import select_target
     from ..websocket_server import start_websocket_and_wait
 
     # Load category names from categories.txt
@@ -141,65 +143,79 @@ async def cleanup_thunderbird_folders(
 
     logger.info(f"Will check for {len(category_names)} category folders in {target_account}")
 
-    # Start WebSocket server and wait for connection
-    ws_config = config.websocket
-    if not ws_config.enabled:
-        logger.error("WebSocket is not enabled in config")
-        return
-
-    result = await start_websocket_and_wait(
-        ws_config, db, config.database.categories_file, timeout=30
-    )
-    if result is None:
-        return
-    server, server_task = result
+    ws_server = None
+    server_task = None
 
     try:
+        # Start WebSocket server if needed for 'local' target
+        if target_account == "local" and websocket_port is not None:
+            from ..config import WebSocketConfig
 
-        # Query Thunderbird for existing folders
-        response = await server.send_request(
-            Action.LIST_FOLDERS,
-            {"accountId": target_account},
-            timeout=10,
-        )
-
-        if not response or not response.ok:
-            error = response.error if response else "No response"
-            logger.error(f"Failed to list folders: {error}")
-            return
-
-        # Find folders that match category names
-        # Each folder is {accountId, path, name, type}
-        existing_folders = (response.result or {}).get("folders", [])
-        folders_to_delete = [f["name"] for f in existing_folders if f.get("name") in category_names]
-
-        if not folders_to_delete:
-            logger.info("No classification folders found to delete")
-            return
-
-        logger.info(f"Found {len(folders_to_delete)} classification folders to delete")
-
-        # Delete each folder
-        deleted = 0
-        failed = 0
-
-        for folder_name in sorted(folders_to_delete):
-            response = await server.send_request(
-                Action.DELETE_FOLDER,
-                {"accountId": target_account, "path": folder_name},
-                timeout=10,
+            ws_config = WebSocketConfig(
+                enabled=True,
+                host="localhost",
+                port=websocket_port,
+                auth_token=config.websocket.auth_token if config.websocket else "",
             )
 
-            if response and response.ok:
-                logger.info(f"  Deleted: {folder_name}")
-                deleted += 1
-            else:
-                error = response.error if response else "No response"
-                logger.warning(f"  Failed to delete {folder_name}: {error}")
-                failed += 1
+            result = await start_websocket_and_wait(
+                ws_config, db, config.database.categories_file, timeout=30
+            )
+            if result is None:
+                return
+            ws_server, server_task = result
+        elif target_account == "local":
+            logger.error("Target 'local' requires --websocket. Use --target-account imap for direct IMAP.")
+            return
 
-        logger.info(f"Cleanup complete: {deleted} deleted, {failed} failed")
+        # Select target
+        try:
+            target = select_target(config, ws_server, target_account)
+            logger.info(f"Using {target.target_type} target")
+        except ValueError as e:
+            logger.error(str(e))
+            return
+
+        async with target:
+            # List folders on target
+            existing_folders = await target.list_folders()
+
+            # Find folders that match category names
+            folders_to_delete = [f for f in existing_folders if f in category_names]
+
+            if not folders_to_delete:
+                logger.info("No classification folders found to delete")
+                return
+
+            logger.info(f"Found {len(folders_to_delete)} classification folders to delete")
+
+            # Delete each folder
+            deleted = 0
+            failed = 0
+
+            for folder_name in sorted(folders_to_delete):
+                success = await target.delete_folder(folder_name)
+                if success:
+                    logger.info(f"  Deleted: {folder_name}")
+                    deleted += 1
+                else:
+                    logger.warning(f"  Failed to delete: {folder_name}")
+                    failed += 1
+
+            logger.info(f"Cleanup complete: {deleted} deleted, {failed} failed")
 
     finally:
-        await server.stop()
-        server_task.cancel()
+        if ws_server:
+            await ws_server.stop()
+        if server_task:
+            server_task.cancel()
+
+
+# Keep old name for backwards compatibility
+async def cleanup_thunderbird_folders(
+    config: Config,
+    db: Database,
+    target_account: str = "local",
+) -> None:
+    """Deprecated: Use cleanup_folders instead."""
+    await cleanup_folders(config, db, target_account, websocket_port=9753)

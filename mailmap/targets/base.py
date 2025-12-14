@@ -42,6 +42,14 @@ class EmailTarget(Protocol):
         """
         ...
 
+    async def list_folders(self) -> list[str]:
+        """List all folders on the target.
+
+        Returns:
+            List of folder names
+        """
+        ...
+
     async def copy_email(
         self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
     ) -> bool:

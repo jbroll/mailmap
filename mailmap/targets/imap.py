@@ -92,6 +92,18 @@ class ImapTarget:
             logger.error(f"Failed to delete folder {folder}: {e}")
             return False
 
+    async def list_folders(self) -> list[str]:
+        """List all folders on the IMAP server.
+
+        Returns:
+            List of folder names
+        """
+        if self._mailbox is None:
+            raise RuntimeError("Target not connected")
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._mailbox.list_folders)
+
     async def copy_email(
         self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
     ) -> bool:

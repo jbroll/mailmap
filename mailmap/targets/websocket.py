@@ -122,6 +122,26 @@ class WebSocketTarget:
             logger.error(f"Failed to delete folder {folder}: {response.error}")
         return False
 
+    async def list_folders(self) -> list[str]:
+        """List all folders via extension.
+
+        Returns:
+            List of folder names
+        """
+        if not self._account_id:
+            raise RuntimeError("Target not connected")
+
+        response = await self._ws_server.send_request(
+            Action.LIST_FOLDERS,
+            {"accountId": self._account_id},
+        )
+        if response and response.ok:
+            folders = (response.result or {}).get("folders", [])
+            return [f.get("name", "") for f in folders if f.get("name")]
+        elif response and response.error:
+            logger.error(f"Failed to list folders: {response.error}")
+        return []
+
     async def copy_email(
         self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
     ) -> bool:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .commands import (
     apply_cli_overrides,
-    cleanup_thunderbird_folders,
+    cleanup_folders,
     clear_cmd,
     copy_email_cmd,
     create_folder_cmd,
@@ -235,9 +235,9 @@ def build_parser() -> argparse.ArgumentParser:
     reset_parser = subparsers.add_parser("reset", help="Delete database and start fresh")
     add_common_args(reset_parser)
 
-    # cleanup - Delete classification folders from Thunderbird
+    # cleanup - Delete classification folders
     cleanup_parser = subparsers.add_parser(
-        "cleanup", help="Delete classification folders from Thunderbird Local Folders"
+        "cleanup", help="Delete classification folders from target (IMAP or Thunderbird)"
     )
     add_common_args(cleanup_parser)
     add_target_args(cleanup_parser)
@@ -383,7 +383,8 @@ def _run_command(args, config: Config, db: Database) -> None:
         upload_to_imap(config, db, dry_run=dry_run, folder_filter=folder_filter)
     elif args.command == "cleanup":
         target_account = getattr(args, "target_account", "local")
-        asyncio.run(cleanup_thunderbird_folders(config, db, target_account=target_account))
+        websocket_port = getattr(args, "websocket", None)
+        asyncio.run(cleanup_folders(config, db, target_account=target_account, websocket_port=websocket_port))
     elif args.command == "daemon":
         process_existing = getattr(args, "process_existing", False)
         move_emails = getattr(args, "move", False)

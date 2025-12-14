@@ -61,3 +61,14 @@ show:
 	@echo "  Libraries: build/lib/ -> /usr/local/lib/mailmap/"
 	@if [ -f build/config.toml ]; then echo "  Config: build/config.toml"; fi
 	@if [ -f build/categories.txt ]; then echo "  Categories: build/categories.txt"; fi
+
+
+inbox-zero:
+	mailmap classify \
+		--folder outlook.office365.com:INBOX \
+		--copy \
+		--target-account imap \
+		--ollama-url http://gpu.local:11434 \
+		--force \
+		--concurrency 5
+
