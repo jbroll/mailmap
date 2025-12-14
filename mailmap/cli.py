@@ -29,7 +29,7 @@ from .commands import (
     summary_cmd,
     upload_to_imap,
 )
-from .config import load_config
+from .config import Config, load_config
 from .database import Database
 
 logging.basicConfig(
@@ -309,6 +309,28 @@ def main() -> None:
 
     db = Database(config.database.path)
 
+    try:
+        _run_command(args, config, db)
+    except KeyboardInterrupt:
+        logger.info("Interrupted")
+        sys.exit(130)
+    except Exception as e:
+        # Clean error display without stack trace
+        error_msg = str(e)
+        # Extract cleaner message from common errors
+        if "Client error" in error_msg or "Server error" in error_msg:
+            logger.error(f"HTTP error: {error_msg}")
+        elif "LOGIN" in error_msg or "authentication" in error_msg.lower():
+            logger.error("IMAP login failed. Check MAILMAP_IMAP_USERNAME and MAILMAP_IMAP_PASSWORD environment variables.")
+        elif "Connection" in error_msg or "connect" in error_msg.lower():
+            logger.error(f"Connection error: {error_msg}")
+        else:
+            logger.error(f"Error: {error_msg}")
+        sys.exit(1)
+
+
+def _run_command(args, config: Config, db: Database) -> None:
+    """Execute the requested command."""
     if args.command == "list":
         limit = getattr(args, "limit", 50)
         list_classifications(db, limit=limit)
