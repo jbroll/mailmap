@@ -414,3 +414,59 @@ class TestEmailOperations:
         untransferred = test_db.get_untransferred_emails()
         assert len(untransferred) == 1
         assert untransferred[0].message_id == "<regular@example.com>"
+
+    def test_clear_all_transfers(self, test_db):
+        # Insert some transferred emails
+        for i in range(3):
+            email = Email(
+                message_id=f"<test{i}@example.com>",
+                folder_id="INBOX",
+                subject=f"Test {i}",
+                from_addr="test@test.com",
+                mbox_path="/path/to/mbox",
+                classification="Work",
+            )
+            test_db.insert_email(email)
+            test_db.mark_as_transferred(f"<test{i}@example.com>")
+
+        # Verify all are transferred
+        assert test_db.get_transferred_count() == 3
+
+        # Clear all transfers
+        cleared = test_db.clear_all_transfers()
+        assert cleared == 3
+        assert test_db.get_transferred_count() == 0
+
+        # Verify emails still exist
+        assert test_db.get_total_count() == 3
+
+    def test_mark_many_as_transferred(self, test_db):
+        # Insert some emails
+        message_ids = []
+        for i in range(5):
+            msg_id = f"<test{i}@example.com>"
+            email = Email(
+                message_id=msg_id,
+                folder_id="INBOX",
+                subject=f"Test {i}",
+                from_addr="test@test.com",
+                mbox_path="/path/to/mbox",
+                classification="Work",
+            )
+            test_db.insert_email(email)
+            message_ids.append(msg_id)
+
+        # Mark multiple as transferred
+        marked = test_db.mark_many_as_transferred(message_ids[:3])
+        assert marked == 3
+        assert test_db.get_transferred_count() == 3
+
+        # Mark the rest
+        marked = test_db.mark_many_as_transferred(message_ids[3:])
+        assert marked == 2
+        assert test_db.get_transferred_count() == 5
+
+    def test_mark_many_as_transferred_empty_list(self, test_db):
+        # Should handle empty list gracefully
+        marked = test_db.mark_many_as_transferred([])
+        assert marked == 0

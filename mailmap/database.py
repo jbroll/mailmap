@@ -145,7 +145,7 @@ class Database:
         """Convert a database row to an Email object."""
         # Handle transferred_at which may not exist in older databases
         transferred_at = None
-        if "transferred_at" in row:
+        if "transferred_at" in row.keys():  # noqa: SIM118
             transferred_at = row["transferred_at"]
 
         return Email(
@@ -199,6 +199,39 @@ class Database:
             (datetime.now(), message_id),
         )
         self.conn.commit()
+
+    def clear_all_transfers(self) -> int:
+        """Clear transferred_at on all emails.
+
+        Returns:
+            Number of emails affected
+        """
+        cursor = self.conn.execute(
+            "UPDATE emails SET transferred_at = NULL WHERE transferred_at IS NOT NULL"
+        )
+        self.conn.commit()
+        return cursor.rowcount
+
+    def mark_many_as_transferred(self, message_ids: list[str]) -> int:
+        """Mark multiple emails as transferred in a single transaction.
+
+        Args:
+            message_ids: List of message IDs to mark as transferred
+
+        Returns:
+            Number of emails updated
+        """
+        if not message_ids:
+            return 0
+
+        now = datetime.now()
+        # Use executemany for efficiency
+        self.conn.executemany(
+            "UPDATE emails SET transferred_at = ? WHERE message_id = ?",
+            [(now, msg_id) for msg_id in message_ids],
+        )
+        self.conn.commit()
+        return len(message_ids)
 
     def get_emails_by_classification(self, classification: str) -> list[Email]:
         """Get all emails with a specific classification (for upload)."""

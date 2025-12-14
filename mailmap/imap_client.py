@@ -149,6 +149,36 @@ class ImapMailbox:
         uids = self.client.search(["ALL"])
         return list(uids[-limit:]) if uids else []
 
+    def fetch_all_message_ids(self, folder: str) -> list[str]:
+        """Fetch all Message-ID headers from a folder.
+
+        Args:
+            folder: The folder to fetch from
+
+        Returns:
+            List of Message-ID strings
+        """
+        self.select_folder(folder)
+        uids = self.client.search(["ALL"])
+        if not uids:
+            return []
+
+        # Fetch only the Message-ID header for efficiency
+        messages = self.client.fetch(uids, ["BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]"])
+        message_ids = []
+        for _uid, data in messages.items():
+            header_data = data.get(b"BODY[HEADER.FIELDS (MESSAGE-ID)]", b"")
+            if header_data:
+                # Parse the header to extract Message-ID
+                header_str = header_data.decode("utf-8", errors="replace")
+                for line in header_str.split("\n"):
+                    if line.lower().startswith("message-id:"):
+                        msg_id = line.split(":", 1)[1].strip()
+                        if msg_id:
+                            message_ids.append(msg_id)
+                        break
+        return message_ids
+
     def get_new_uids_since(self, folder: str, last_uid: int) -> list[int]:
         """Get UIDs of messages newer than last_uid."""
         self.select_folder(folder)

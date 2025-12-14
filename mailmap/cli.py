@@ -27,6 +27,7 @@ from .commands import (
     run_init_folders,
     run_learn_folders,
     summary_cmd,
+    sync_transfers,
     upload_to_imap,
 )
 from .config import Config, load_config
@@ -235,6 +236,17 @@ def build_parser() -> argparse.ArgumentParser:
     reset_parser = subparsers.add_parser("reset", help="Delete database and start fresh")
     add_common_args(reset_parser)
 
+    # sync - Sync transfer state with IMAP folders
+    sync_parser = subparsers.add_parser(
+        "sync", help="Sync database transfer state with actual IMAP folder contents"
+    )
+    add_common_args(sync_parser)
+    sync_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be synced without making changes",
+    )
+
     # cleanup - Delete classification folders
     cleanup_parser = subparsers.add_parser(
         "cleanup", help="Delete classification folders from target (IMAP or Thunderbird)"
@@ -413,6 +425,9 @@ def _run_command(args, config: Config, db: Database) -> None:
         move_email_cmd(config, args.folder, args.uid, args.dest)
     elif args.command == "copy":
         copy_email_cmd(config, args.folder, args.uid, args.dest)
+    elif args.command == "sync":
+        dry_run = getattr(args, "dry_run", False)
+        sync_transfers(config, db, dry_run=dry_run)
 
 
 if __name__ == "__main__":

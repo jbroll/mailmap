@@ -112,6 +112,107 @@ def reset_database(db_path: Path) -> None:
         logger.info(f"Database does not exist: {db_path}")
 
 
+def sync_transfers(config: Config, db: Database, dry_run: bool = False) -> None:
+    """Sync database transfer state with actual IMAP folder contents.
+
+    This clears all transferred_at values, then scans category folders
+    on the IMAP server and marks emails found there as transferred.
+
+    Args:
+        config: Application configuration
+        db: Database instance
+        dry_run: If True, only report what would be done
+    """
+    from ..categories import load_categories
+    from ..imap_client import ImapMailbox
+
+    db.connect()
+    db.init_schema()
+
+    try:
+        # Load categories to know which folders to scan
+        categories_path = Path(config.database.categories_file)
+        categories = load_categories(categories_path)
+
+        if not categories:
+            logger.error(f"No categories found in {categories_path}")
+            return
+
+        category_folders = [cat.name for cat in categories]
+        logger.info(f"Will scan {len(category_folders)} category folders")
+
+        # Get current transfer stats
+        before_count = db.get_transferred_count()
+        total_emails = db.get_total_count()
+
+        if dry_run:
+            logger.info(f"[DRY RUN] Would clear {before_count} transferred markers")
+        else:
+            cleared = db.clear_all_transfers()
+            logger.info(f"Cleared {cleared} transferred markers")
+
+        # Connect to IMAP
+        mailbox = ImapMailbox(config.imap)
+        mailbox.connect()
+        logger.info(f"Connected to {config.imap.host}")
+
+        try:
+            # Get list of existing folders on server
+            server_folders = set(mailbox.list_folders())
+
+            total_found = 0
+            total_marked = 0
+
+            for folder in category_folders:
+                if folder not in server_folders:
+                    logger.debug(f"  {folder}: not on server, skipping")
+                    continue
+
+                # Fetch all message IDs from this folder
+                try:
+                    message_ids = mailbox.fetch_all_message_ids(folder)
+                except Exception as e:
+                    logger.warning(f"  {folder}: error fetching - {e}")
+                    continue
+
+                if not message_ids:
+                    logger.debug(f"  {folder}: empty")
+                    continue
+
+                total_found += len(message_ids)
+
+                if dry_run:
+                    logger.info(f"  {folder}: found {len(message_ids)} emails")
+                else:
+                    # Mark these as transferred in DB
+                    marked = db.mark_many_as_transferred(message_ids)
+                    total_marked += marked
+                    logger.info(f"  {folder}: {len(message_ids)} found, {marked} marked")
+
+            # Summary
+            after_count = db.get_transferred_count() if not dry_run else 0
+
+            logger.info("")
+            if dry_run:
+                logger.info(f"[DRY RUN] Would mark up to {total_found} emails as transferred")
+                logger.info(f"Total emails in DB: {total_emails}")
+            else:
+                logger.info(f"Sync complete: {after_count} emails marked as transferred")
+                logger.info(f"Total emails in DB: {total_emails}")
+                unsynced = total_emails - after_count - db.get_spam_count()
+                if unsynced > 0:
+                    classified = db.get_classified_count()
+                    untransferred = classified - after_count
+                    if untransferred > 0:
+                        logger.info(f"Classified but not transferred: {untransferred}")
+
+        finally:
+            mailbox.disconnect()
+
+    finally:
+        db.close()
+
+
 def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
     """Apply command-line overrides to config."""
     if getattr(args, "db_path", None):

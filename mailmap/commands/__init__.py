@@ -21,6 +21,7 @@ from .utils import (
     list_classifications,
     reset_database,
     summary_cmd,
+    sync_transfers,
 )
 
 __all__ = [
@@ -56,4 +57,5 @@ __all__ = [
     "list_classifications",
     "reset_database",
     "summary_cmd",
+    "sync_transfers",
 ]
