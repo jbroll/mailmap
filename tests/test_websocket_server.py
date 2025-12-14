@@ -365,3 +365,189 @@ class TestWebSocketServer:
 
         await asyncio.sleep(0.1)
         assert server.is_connected is False
+
+
+class TestWebSocketServerAuth:
+    """Tests for WebSocket server authentication."""
+
+    @pytest.fixture
+    def db(self, tmp_path):
+        """Create a test database."""
+        db_path = tmp_path / "test.db"
+        db = Database(str(db_path))
+        db.connect()
+        db.init_schema()
+        yield db
+        db.close()
+
+    @pytest.fixture
+    def categories_file(self, tmp_path):
+        """Create a test categories file."""
+        cat_path = tmp_path / "categories.txt"
+        save_categories([], cat_path)
+        return cat_path
+
+    @pytest.fixture
+    def config_with_token(self):
+        """Create test config with auth token."""
+        import random
+        port = random.randint(19000, 19999)
+        return WebSocketConfig(
+            enabled=True,
+            host="127.0.0.1",
+            port=port,
+            auth_token="test-secret-token-12345"
+        )
+
+    @pytest.fixture
+    def config_without_token(self):
+        """Create test config without auth token."""
+        import random
+        port = random.randint(19000, 19999)
+        return WebSocketConfig(enabled=True, host="127.0.0.1", port=port)
+
+    @pytest.mark.asyncio
+    async def test_request_includes_auth_token(self, config_with_token, db, categories_file):
+        """Test that server requests include auth token when configured."""
+        server = WebSocketServer(config_with_token, db, categories_file)
+        server_task = asyncio.create_task(server.start())
+        await asyncio.sleep(0.2)
+
+        try:
+            async with websockets.connect(
+                f"ws://{config_with_token.host}:{config_with_token.port}"
+            ) as ws:
+                await ws.recv()  # connected event
+
+                # Start server request in background
+                async def server_request():
+                    return await server.send_request(Action.PING, {}, timeout=5)
+
+                request_task = asyncio.create_task(server_request())
+
+                # Client receives request - verify it has token
+                msg = await asyncio.wait_for(ws.recv(), timeout=2)
+                req = json.loads(msg)
+
+                assert "token" in req
+                assert req["token"] == "test-secret-token-12345"
+                assert req["action"] == "ping"
+
+                # Send response
+                await ws.send(json.dumps({
+                    "id": req["id"],
+                    "ok": True,
+                    "result": {"pong": True}
+                }))
+
+                response = await request_task
+                assert response.ok is True
+        finally:
+            await server.stop()
+            server_task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_request_without_token_when_not_configured(
+        self, config_without_token, db, categories_file
+    ):
+        """Test that server requests don't include token when not configured."""
+        server = WebSocketServer(config_without_token, db, categories_file)
+        server_task = asyncio.create_task(server.start())
+        await asyncio.sleep(0.2)
+
+        try:
+            async with websockets.connect(
+                f"ws://{config_without_token.host}:{config_without_token.port}"
+            ) as ws:
+                await ws.recv()  # connected event
+
+                # Start server request in background
+                async def server_request():
+                    return await server.send_request(Action.PING, {}, timeout=5)
+
+                request_task = asyncio.create_task(server_request())
+
+                # Client receives request - verify no token
+                msg = await asyncio.wait_for(ws.recv(), timeout=2)
+                req = json.loads(msg)
+
+                assert "token" not in req
+                assert req["action"] == "ping"
+
+                # Send response
+                await ws.send(json.dumps({
+                    "id": req["id"],
+                    "ok": True,
+                    "result": {"pong": True}
+                }))
+
+                response = await request_task
+                assert response.ok is True
+        finally:
+            await server.stop()
+            server_task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_connection_succeeds_without_header_auth(
+        self, config_with_token, db, categories_file
+    ):
+        """Test that clients can connect without providing auth header.
+
+        Browser WebSockets can't send custom headers, so we don't require
+        header-based auth. Security is enforced at the message level instead.
+        """
+        server = WebSocketServer(config_with_token, db, categories_file)
+        server_task = asyncio.create_task(server.start())
+        await asyncio.sleep(0.2)
+
+        try:
+            # Connect without any auth header - should succeed
+            async with websockets.connect(
+                f"ws://{config_with_token.host}:{config_with_token.port}"
+            ) as ws:
+                msg = await asyncio.wait_for(ws.recv(), timeout=2)
+                data = json.loads(msg)
+                assert data["event"] == "connected"
+                assert "clientId" in data["data"]
+        finally:
+            await server.stop()
+            server_task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_multiple_requests_all_include_token(
+        self, config_with_token, db, categories_file
+    ):
+        """Test that all server requests include the auth token."""
+        server = WebSocketServer(config_with_token, db, categories_file)
+        server_task = asyncio.create_task(server.start())
+        await asyncio.sleep(0.2)
+
+        try:
+            async with websockets.connect(
+                f"ws://{config_with_token.host}:{config_with_token.port}"
+            ) as ws:
+                await ws.recv()  # connected event
+
+                # Send multiple requests and verify each has token
+                for action in [Action.PING, Action.LIST_FOLDERS, Action.GET_MESSAGE]:
+                    async def server_request(a=action):
+                        return await server.send_request(a, {}, timeout=5)
+
+                    request_task = asyncio.create_task(server_request())
+
+                    msg = await asyncio.wait_for(ws.recv(), timeout=2)
+                    req = json.loads(msg)
+
+                    assert req["token"] == "test-secret-token-12345"
+
+                    # Send response
+                    await ws.send(json.dumps({
+                        "id": req["id"],
+                        "ok": True,
+                        "result": {}
+                    }))
+
+                    await request_task
+        finally:
+            await server.stop()
+            server_task.cancel()
