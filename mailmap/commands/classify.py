@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -90,9 +91,10 @@ async def bulk_classify(
 
     action_verb = "Moving" if move else "Copying"
     action_past = "moved" if move else "copied"
+    start_time = time.time()
 
     try:
-        async with source:
+        async with source, OllamaClient(config.ollama) as llm:
             # Connect target if available
             if target:
                 await target.connect()
@@ -178,13 +180,12 @@ async def bulk_classify(
 
                         # Classify email
                         try:
-                            async with OllamaClient(config.ollama) as llm:
-                                result = await llm.classify_email(
-                                    email.subject,
-                                    email.from_addr,
-                                    email.body_text,
-                                    folder_descriptions,
-                                )
+                            result = await llm.classify_email(
+                                email.subject,
+                                email.from_addr,
+                                email.body_text,
+                                folder_descriptions,
+                            )
                             db.update_classification(
                                 email.message_id,
                                 result.predicted_folder,
@@ -192,6 +193,12 @@ async def bulk_classify(
                             )
                             classifications.append((email.message_id, result.predicted_folder))
                             total_classified += 1
+
+                            # Log progress every 10 emails
+                            if total_classified % 10 == 0:
+                                elapsed = time.time() - start_time
+                                rate = total_classified / elapsed if elapsed > 0 else 0
+                                logger.info(f"  Progress: {total_classified} classified, {rate:.1f} emails/sec")
 
                             # Copy/move if target available
                             if target:
@@ -233,9 +240,12 @@ async def bulk_classify(
         logger.error(f"Error during classification: {e}")
         raise
 
+    elapsed = time.time() - start_time
+    rate = total_classified / elapsed if elapsed > 0 else 0
     logger.info(
         f"Classification complete: {total_imported} imported, {total_classified} classified, {total_spam} spam"
     )
+    logger.info(f"Elapsed time: {elapsed:.1f}s, rate: {rate:.2f} emails/sec")
     if target:
         logger.info(f"Target actions: {total_copied} {action_past}, {total_failed} failed")
 
