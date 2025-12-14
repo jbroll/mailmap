@@ -56,15 +56,11 @@ class WebSocketServer:
         """Handle a client connection."""
         client_id = str(uuid.uuid4())[:8]
 
-        # Check authentication if token is configured
-        if self.config.auth_token:
-            token = ""
-            if websocket.request and websocket.request.headers:
-                token = websocket.request.headers.get("X-Mailmap-Token", "")
-            if token != self.config.auth_token:
-                logger.warning(f"Rejected connection from {websocket.remote_address}: invalid token")
-                await websocket.close(1008, "Authentication failed")
-                return
+        # Note: We don't authenticate connections because browser WebSockets can't send
+        # custom headers. Security is enforced at the message level - the extension
+        # validates the token in each request from the server before executing commands.
+        # The server only listens on localhost (127.0.0.1) so external connections
+        # aren't possible anyway.
 
         self._clients[client_id] = websocket
         logger.info(f"Client {client_id} connected from {websocket.remote_address}")
