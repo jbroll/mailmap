@@ -171,6 +171,7 @@ pytest -v
 
 The system consists of these core modules in `mailmap/`:
 
+### Core Modules
 - **config.py**: TOML-based configuration with dataclass models
 - **categories.py**: Load/save categories from editable text file (categories.txt)
 - **content.py**: Email content cleaning (removes HTML, signatures, quotes, disclaimers)
@@ -182,10 +183,23 @@ The system consists of these core modules in `mailmap/`:
 - **thunderbird.py**: Thunderbird profile reader for importing from mbox files
 - **websocket_server.py**: WebSocket server for Thunderbird extension communication
 - **protocol.py**: WebSocket message schemas (Request, Response, Event)
-- **main.py**: CLI entry point and orchestration
-- **prompts/**: Editable prompt templates for LLM interactions
+
+### CLI and Commands
+- **main.py**: Entry point (imports from cli.py)
+- **cli.py**: Argument parsing and command dispatch
+- **commands/**: Command implementations
+  - **daemon.py**: IMAP listener and EmailProcessor for real-time classification
+  - **classify.py**: Bulk email classification with optional copy/move
+  - **learn.py**: Learn categories from existing Thunderbird folder structure
+  - **init.py**: Analyze emails and suggest folder structure
+  - **upload.py**: Upload classified emails to IMAP, cleanup Thunderbird folders
+  - **imap_ops.py**: IMAP folder/email management (list, read, create, delete, move, copy)
+  - **utils.py**: Utility commands (list, summary, clear, reset, categories)
+
+### Abstractions
 - **sources/**: Email source abstractions (ThunderbirdSource, ImapSource)
 - **targets/**: Email target abstractions (WebSocketTarget, ImapTarget)
+- **prompts/**: Editable prompt templates for LLM interactions
 
 ## Categories File
 
