@@ -1,3 +1,13 @@
+# Project specific
+config.toml
+.env.production
+*.db
+mailmap.db
+*.xpi
+error.log
+
+
+
 # Python
 __pycache__/
 *.py[cod]
@@ -37,10 +47,3 @@ ENV/
 htmlcov/
 .tox/
 
-# Project specific
-config.toml
-.env.production
-*.db
-mailmap.db
-*.xpi
-error.log

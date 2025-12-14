@@ -306,7 +306,7 @@ class TestImapMailboxOperations:
     def test_fetch_email(self, imap_config, mock_imap_client):
         raw_email = b"From: sender@example.com\r\nSubject: Test Email\r\nMessage-ID: <test123@example.com>\r\n\r\nEmail body"
         mock_imap_client.fetch.return_value = {
-            123: {b"RFC822": raw_email}
+            123: {b"BODY[]": raw_email}
         }
 
         mailbox = ImapMailbox(imap_config)
@@ -332,7 +332,7 @@ class TestImapMailboxOperations:
     def test_fetch_raw_email(self, imap_config, mock_imap_client):
         raw_email = b"From: sender@example.com\r\nSubject: Test Email\r\n\r\nBody"
         mock_imap_client.fetch.return_value = {
-            123: {b"RFC822": raw_email}
+            123: {b"BODY[]": raw_email}
         }
 
         mailbox = ImapMailbox(imap_config)

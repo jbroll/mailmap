@@ -20,6 +20,13 @@ pytest tests/test_database.py   # Specific file
 pytest -v                       # Verbose
 ```
 
+## Deployment
+
+```bash
+../deploy.sh/deploy.sh update .   # Deploy code changes to server
+../deploy.sh/deploy.sh init .     # Full initial deployment (includes infrastructure)
+```
+
 ## Project Structure
 
 ```

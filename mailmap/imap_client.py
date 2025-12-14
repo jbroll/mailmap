@@ -104,11 +104,12 @@ class ImapMailbox:
     def fetch_email(self, uid: int, folder: str) -> EmailMessage | None:
         """Fetch a single email by UID."""
         self.select_folder(folder)
-        messages = self.client.fetch([uid], ["RFC822"])
+        # Use BODY.PEEK[] to avoid marking as read
+        messages = self.client.fetch([uid], ["BODY.PEEK[]"])
         if uid not in messages:
             return None
 
-        raw = messages[uid][b"RFC822"]
+        raw = messages[uid][b"BODY[]"]
         msg = email.message_from_bytes(raw)
 
         message_id = msg.get("Message-ID", f"<uid-{uid}@local>")
@@ -136,10 +137,11 @@ class ImapMailbox:
             Raw RFC822 email bytes, or None if not found
         """
         self.select_folder(folder)
-        messages = self.client.fetch([uid], ["RFC822"])
+        # Use BODY.PEEK[] to avoid marking as read
+        messages = self.client.fetch([uid], ["BODY.PEEK[]"])
         if uid not in messages:
             return None
-        return messages[uid][b"RFC822"]
+        return messages[uid][b"BODY[]"]
 
     def fetch_recent_uids(self, folder: str, limit: int = 50) -> list[int]:
         """Fetch UIDs of recent messages in a folder."""

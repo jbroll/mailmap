@@ -251,11 +251,12 @@ class ImapTarget:
 
         messages = await loop.run_in_executor(
             None,
-            lambda: mailbox.client.fetch([uid], ["RFC822"]),
+            # Use BODY.PEEK[] to avoid marking as read
+            lambda: mailbox.client.fetch([uid], ["BODY.PEEK[]"]),
         )
 
         if uid in messages:
-            return messages[uid][b"RFC822"]
+            return messages[uid][b"BODY[]"]
 
         return None
 
