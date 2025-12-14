@@ -108,6 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Mailmap email classification system",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    # Add common args to main parser for when no subcommand is given
+    add_common_args(parser)
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # daemon - Run IMAP daemon (default)
@@ -280,9 +282,10 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    # Default to daemon if no command specified
+    # Show help if no command specified
     if not args.command:
-        args.command = "daemon"
+        parser.print_help()
+        sys.exit(0)
 
     if not args.config.exists():
         logger.error(f"Configuration file not found: {args.config}")
