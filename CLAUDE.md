@@ -18,10 +18,21 @@ pip install -e ".[dev]"
 
 # Copy and configure
 cp config.example.toml config.toml
-# Edit config.toml with your IMAP credentials and Ollama settings
+
+# Set credentials via environment variables (required)
+export MAILMAP_IMAP_USERNAME="your-email@example.com"
+export MAILMAP_IMAP_PASSWORD="your-password"
 ```
 
 Requires Ollama running locally with a model (default: `qwen2.5:7b`).
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MAILMAP_IMAP_USERNAME` | Yes | IMAP username/email |
+| `MAILMAP_IMAP_PASSWORD` | Yes | IMAP password (not allowed in config file) |
+| `MAILMAP_WS_TOKEN` | No | WebSocket authentication token |
 
 ## CLI Commands
 
