@@ -45,7 +45,8 @@ mailmap/
 │   ├── thunderbird.py  # ThunderbirdSource
 │   └── imap.py         # ImapSource
 ├── targets/            # Email target abstractions
-│   ├── websocket.py    # WebSocketTarget
+│   ├── base.py         # EmailTarget protocol
+│   ├── websocket.py    # WebSocketTarget (self-contained)
 │   └── imap.py         # ImapTarget
 ├── prompts/            # LLM prompt templates (editable .txt files)
 ├── config.py           # TOML config with dataclasses
@@ -89,8 +90,29 @@ Sources yield `UnifiedEmail` objects from different backends:
 - `ImapSource`: Direct IMAP fetch
 
 Targets perform operations on classified emails:
-- `ImapTarget`: Move/copy on IMAP server
-- `WebSocketTarget`: Send to Thunderbird extension
+- `ImapTarget`: Direct IMAP server operations
+- `WebSocketTarget`: Via Thunderbird extension (manages its own server)
+
+### Using Targets
+
+Targets are self-contained and manage their own connections:
+
+```python
+from mailmap.targets import select_target
+
+# select_target(config, target_account, websocket_port)
+# - "imap": Direct IMAP connection
+# - "local" + port: WebSocket to Thunderbird Local Folders
+# - other + port: WebSocket to specific account
+
+target = select_target(config, "imap")  # Direct IMAP
+target = select_target(config, "local", websocket_port=9753)  # WebSocket
+
+async with target:
+    await target.create_folder("MyFolder")
+    await target.copy_email(message_id, "MyFolder", raw_bytes)
+    folders = await target.list_folders()
+```
 
 ### Config Loading
 
