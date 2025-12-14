@@ -4,15 +4,13 @@ import mailbox
 
 import pytest
 
-from mailmap.thunderbird import (
-    ThunderbirdEmail,
-    ThunderbirdReader,
+from mailmap.mbox import ThunderbirdEmail, list_mbox_files, read_mbox
+from mailmap.profile import (
     find_imap_mail_dirs,
     get_account_server_mapping,
-    list_mbox_files,
     parse_prefs_js,
-    read_mbox,
 )
+from mailmap.thunderbird import ThunderbirdReader
 
 
 @pytest.fixture

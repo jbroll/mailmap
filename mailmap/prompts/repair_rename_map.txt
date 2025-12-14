@@ -1,0 +1,26 @@
+You previously consolidated {original_count} categories into {consolidated_count} categories, but the rename_map is missing {missing_count} entries.
+
+ORIGINAL CATEGORIES (before consolidation):
+{original_text}
+
+CONSOLIDATED CATEGORIES (after consolidation):
+{consolidated_text}
+
+EXISTING MAPPINGS (already done correctly):
+{existing_mappings_text}
+
+MISSING FROM RENAME_MAP (need to be mapped):
+{missing_text}
+
+For each missing category, determine which consolidated category it should map to based on semantic similarity.
+Look at the existing mappings to understand the consolidation pattern.
+
+OUTPUT JSON only:
+{{
+  "mappings": {{
+    "MissingCategory1": "ConsolidatedCategory",
+    "MissingCategory2": "ConsolidatedCategory"
+  }}
+}}
+
+JSON:

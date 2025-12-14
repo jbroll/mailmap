@@ -614,33 +614,17 @@ class OllamaClient:
             f"  {old} -> {new}" for old, new in sorted(partial_map.items())
         )
 
-        prompt = f"""You previously consolidated {len(original_categories)} categories into {len(consolidated)} categories, but the rename_map is missing {len(missing)} entries.
+        prompt_template = load_prompt("repair_rename_map")
+        prompt = prompt_template.format(
+            original_count=len(original_categories),
+            consolidated_count=len(consolidated),
+            missing_count=len(missing),
+            original_text=original_text,
+            consolidated_text=consolidated_text,
+            existing_mappings_text=existing_mappings_text,
+            missing_text=missing_text,
+        )
 
-ORIGINAL CATEGORIES (before consolidation):
-{original_text}
-
-CONSOLIDATED CATEGORIES (after consolidation):
-{consolidated_text}
-
-EXISTING MAPPINGS (already done correctly):
-{existing_mappings_text}
-
-MISSING FROM RENAME_MAP (need to be mapped):
-{missing_text}
-
-For each missing category, determine which consolidated category it should map to based on semantic similarity.
-Look at the existing mappings to understand the consolidation pattern.
-
-OUTPUT JSON only:
-{{
-  "mappings": {{
-    "MissingCategory1": "ConsolidatedCategory",
-    "MissingCategory2": "ConsolidatedCategory"
-  }}
-}}
-
-JSON:
-"""
         logger.info(f"Asking LLM to repair {len(missing)} missing mappings...")
 
         response_text = await self._generate(prompt)
