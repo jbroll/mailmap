@@ -149,6 +149,7 @@ The system consists of these core modules in `mailmap/`:
 - **categories.py**: Load/save categories from editable text file (categories.txt)
 - **content.py**: Email content cleaning (removes HTML, signatures, quotes, disclaimers)
 - **database.py**: SQLite schema and operations for emails/classifications
+- **email.py**: UnifiedEmail dataclass for source-agnostic email representation
 - **imap_client.py**: IMAP connection, IDLE monitoring, and polling
 - **llm.py**: Ollama REST API client for classification and folder description generation
 - **spam.py**: Spam detection from email headers using configurable rules
@@ -157,6 +158,8 @@ The system consists of these core modules in `mailmap/`:
 - **protocol.py**: WebSocket message schemas (Request, Response, Event)
 - **main.py**: CLI entry point and orchestration
 - **prompts/**: Editable prompt templates for LLM interactions
+- **sources/**: Email source abstractions (ThunderbirdSource, ImapSource)
+- **targets/**: Email target abstractions (WebSocketTarget, ImapTarget)
 
 ## Categories File
 
