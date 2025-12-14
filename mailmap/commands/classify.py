@@ -283,9 +283,9 @@ async def bulk_classify(
                     emails_to_process: list[tuple[UnifiedEmail, str]] = []
 
                     async for email in source.read_emails(folder_spec, limit, random_sample):
-                        # Check if already processed (skip unless --force)
+                        # Check if already classified (skip unless --force)
                         existing = db.get_email(email.message_id)
-                        if existing and not force:
+                        if existing and existing.classification and not force:
                             continue
 
                         # Check for spam (if headers available)
