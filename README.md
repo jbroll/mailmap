@@ -193,13 +193,21 @@ mailmap emails INBOX --limit 100
 # Read email by UID
 mailmap read INBOX 123
 
-# Folder management
+# Folder management (default: direct IMAP)
 mailmap create-folder MyFolder
 mailmap delete-folder MyFolder
+
+# Folder management via Thunderbird extension
+mailmap create-folder MyFolder --target-account local --websocket
+mailmap delete-folder MyFolder --target-account imap --websocket
 
 # Move/copy emails
 mailmap move INBOX 123 Archive
 mailmap copy INBOX 123 Archive
+
+# Cleanup classification folders from target
+mailmap cleanup --target-account imap
+mailmap cleanup --target-account local --websocket
 ```
 
 ## Common Options
@@ -221,6 +229,13 @@ Thunderbird commands (learn/classify/init) also support:
 --limit N              # Max emails (integer or fraction like 0.1 for 10%)
 --random               # Random sampling instead of sequential
 --source-type TYPE     # 'thunderbird' (default) or 'imap'
+```
+
+Target commands (classify, cleanup, create-folder, delete-folder) support:
+
+```bash
+--target-account ACCT  # 'local' (Thunderbird), 'imap' (direct), or account ID
+--websocket [PORT]     # Use WebSocket (default port: 9753)
 ```
 
 ## Typical Workflow
@@ -280,8 +295,9 @@ mailmap daemon --move
 - `ImapSource`: Reads directly from IMAP server
 
 **Email Targets** (`targets/`)
-- `ImapTarget`: Moves/copies emails on IMAP server
-- `WebSocketTarget`: Communicates with Thunderbird extension
+- `ImapTarget`: Direct IMAP server operations
+- `WebSocketTarget`: Via Thunderbird extension (self-contained, manages its own server)
+- Both implement `EmailTarget` protocol with `create_folder`, `delete_folder`, `list_folders`, `copy_email`, `move_email`
 
 **Core Services**
 - `llm.py`: Ollama REST API client for classification
