@@ -17,6 +17,7 @@ from .upload import cleanup_folders, cleanup_thunderbird_folders, upload_to_imap
 from .utils import (
     apply_cli_overrides,
     clear_cmd,
+    dedup_folders,
     list_categories_cmd,
     list_classifications,
     reset_database,
@@ -54,6 +55,7 @@ __all__ = [
     # utils
     "apply_cli_overrides",
     "clear_cmd",
+    "dedup_folders",
     "list_categories_cmd",
     "list_classifications",
     "reset_database",

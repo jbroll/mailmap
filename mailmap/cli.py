@@ -14,6 +14,7 @@ from .commands import (
     clear_cmd,
     copy_email_cmd,
     create_folder_cmd,
+    dedup_folders,
     delete_folder_cmd,
     list_categories_cmd,
     list_classifications,
@@ -273,6 +274,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum seconds between IMAP operations (default: 1.0)",
     )
 
+    # dedup - Remove duplicate emails from category folders
+    dedup_parser = subparsers.add_parser(
+        "dedup", help="Remove duplicate emails from category folders on IMAP"
+    )
+    add_common_args(dedup_parser)
+    dedup_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted without deleting",
+    )
+
     # cleanup - Delete classification folders
     cleanup_parser = subparsers.add_parser(
         "cleanup", help="Delete classification folders from target (IMAP or Thunderbird)"
@@ -460,6 +472,9 @@ def _run_command(args, config: Config, db: Database) -> None:
         move_mode = getattr(args, "move", False)
         rate_limit = getattr(args, "rate_limit", 1.0)
         asyncio.run(transfer_emails(config, db, move=move_mode, rate_limit=rate_limit))
+    elif args.command == "dedup":
+        dry_run = getattr(args, "dry_run", False)
+        dedup_folders(config, dry_run=dry_run)
 
 
 if __name__ == "__main__":

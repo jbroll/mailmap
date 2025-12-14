@@ -213,6 +213,108 @@ def sync_transfers(config: Config, db: Database, dry_run: bool = False) -> None:
         db.close()
 
 
+def dedup_folders(config: Config, dry_run: bool = False) -> int:
+    """Remove duplicate emails from category folders on IMAP.
+
+    Scans each category folder and removes emails with duplicate Message-IDs,
+    keeping only the first occurrence.
+
+    Args:
+        config: Application configuration
+        dry_run: If True, only report what would be deleted
+
+    Returns:
+        Number of duplicates removed
+    """
+    from ..categories import load_categories
+    from ..imap_client import ImapMailbox
+
+    categories_path = Path(config.database.categories_file)
+    categories = load_categories(categories_path)
+
+    if not categories:
+        logger.error(f"No categories found in {categories_path}")
+        return 0
+
+    category_folders = [cat.name for cat in categories]
+    logger.info(f"Scanning {len(category_folders)} category folders for duplicates")
+
+    mailbox = ImapMailbox(config.imap)
+    mailbox.connect()
+    logger.info(f"Connected to {config.imap.host}")
+
+    total_deleted = 0
+
+    try:
+        server_folders = set(mailbox.list_folders())
+
+        for folder in category_folders:
+            if folder not in server_folders:
+                continue
+
+            mailbox.select_folder(folder)
+            uids = mailbox.client.search(["ALL"])
+
+            if not uids:
+                continue
+
+            # Fetch Message-IDs for all emails
+            messages = mailbox.client.fetch(
+                uids, ["BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]"]
+            )
+
+            # Track seen Message-IDs and duplicates
+            seen: dict[str, int] = {}  # message_id -> first UID
+            duplicates: list[int] = []
+
+            for uid in uids:
+                data = messages.get(uid, {})
+                header_data = data.get(b"BODY[HEADER.FIELDS (MESSAGE-ID)]", b"")
+                if not header_data:
+                    continue
+
+                # Parse Message-ID (handle folded headers)
+                header_str = header_data.decode("utf-8", errors="replace")
+                header_str = header_str.replace("\r\n ", " ").replace("\r\n\t", " ")
+                header_str = header_str.replace("\n ", " ").replace("\n\t", " ")
+
+                msg_id = None
+                for line in header_str.split("\n"):
+                    if line.lower().startswith("message-id:"):
+                        msg_id = line.split(":", 1)[1].strip()
+                        break
+
+                if not msg_id:
+                    continue
+
+                if msg_id in seen:
+                    duplicates.append(uid)
+                else:
+                    seen[msg_id] = uid
+
+            if duplicates:
+                if dry_run:
+                    logger.info(f"  {folder}: {len(duplicates)} duplicates (would delete)")
+                else:
+                    # Delete duplicates
+                    mailbox.client.delete_messages(duplicates)
+                    mailbox.client.expunge()
+                    logger.info(f"  {folder}: deleted {len(duplicates)} duplicates")
+                total_deleted += len(duplicates)
+            else:
+                logger.debug(f"  {folder}: no duplicates")
+
+    finally:
+        mailbox.disconnect()
+
+    if dry_run:
+        logger.info(f"[DRY RUN] Would delete {total_deleted} total duplicates")
+    else:
+        logger.info(f"Deleted {total_deleted} total duplicates")
+
+    return total_deleted
+
+
 def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
     """Apply command-line overrides to config."""
     if getattr(args, "db_path", None):
