@@ -508,6 +508,112 @@ binary
         assert "notes.txt" in filenames
         assert "doc.pdf" in filenames
 
+    def test_csv_attachment(self):
+        """Test extracting and parsing CSV attachment."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Order details attached
+--boundary
+Content-Type: text/csv; name="order.csv"
+Content-Disposition: attachment; filename="order.csv"
+
+Product,Quantity,Price
+Widget A,5,19.99
+Widget B,2,29.99
+Widget C,1,49.99
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["filename"] == "order.csv"
+        text = result[0]["text_content"]
+        assert "Columns: Product, Quantity, Price" in text
+        assert "Rows: 3" in text
+
+    def test_json_attachment(self):
+        """Test extracting and parsing JSON attachment."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Receipt attached
+--boundary
+Content-Type: application/json; name="receipt.json"
+Content-Disposition: attachment; filename="receipt.json"
+
+{"order_id": "12345", "total": 99.99, "items": [{"name": "Widget", "qty": 2}]}
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["filename"] == "receipt.json"
+        text = result[0]["text_content"]
+        assert "order_id" in text
+        assert "12345" in text
+        assert "total" in text
+
+    def test_xml_attachment(self):
+        """Test extracting and parsing XML attachment."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Invoice attached
+--boundary
+Content-Type: application/xml; name="invoice.xml"
+Content-Disposition: attachment; filename="invoice.xml"
+
+<?xml version="1.0"?>
+<invoice>
+  <id>INV-001</id>
+  <amount>150.00</amount>
+  <status>paid</status>
+</invoice>
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["filename"] == "invoice.xml"
+        text = result[0]["text_content"]
+        assert "Root: <invoice>" in text
+        assert "amount" in text.lower() or "id" in text.lower()
+
+    def test_application_ics_attachment(self):
+        """Test application/ics MIME type (alternate calendar format)."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Meeting invite
+--boundary
+Content-Type: application/ics; name="meeting.ics"
+Content-Disposition: attachment; filename="meeting.ics"
+
+BEGIN:VCALENDAR
+BEGIN:VEVENT
+SUMMARY:Team Meeting
+LOCATION:Room 101
+END:VEVENT
+END:VCALENDAR
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["filename"] == "meeting.ics"
+        text = result[0]["text_content"]
+        assert "SUMMARY: Team Meeting" in text
+        assert "LOCATION: Room 101" in text
+
 
 class TestFetchAllMessageIds:
     """Tests for fetch_all_message_ids with various header formats."""

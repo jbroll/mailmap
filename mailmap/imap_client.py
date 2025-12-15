@@ -122,18 +122,35 @@ def extract_attachments(msg: email.message.Message) -> list[dict[str, str | None
         }
 
         # Parse text-based attachments
-        if content_type in ("text/calendar", "text/plain", "text/x-vcard", "text/vcard"):
+        parseable_types = (
+            "text/calendar",
+            "application/ics",
+            "text/plain",
+            "text/x-vcard",
+            "text/vcard",
+            "text/csv",
+            "application/json",
+            "text/xml",
+            "application/xml",
+        )
+        if content_type in parseable_types:
             try:
                 payload = part.get_payload(decode=True)
                 if isinstance(payload, bytes):
                     charset = part.get_content_charset() or "utf-8"
                     text = payload.decode(charset, errors="replace")
 
-                    # For calendar files, extract key fields
-                    if content_type == "text/calendar":
+                    # Apply format-specific parsing to extract key info
+                    if content_type in ("text/calendar", "application/ics"):
                         text = _parse_ics_summary(text)
+                    elif content_type == "text/csv":
+                        text = _parse_csv_summary(text)
+                    elif content_type == "application/json":
+                        text = _parse_json_summary(text)
+                    elif content_type in ("text/xml", "application/xml"):
+                        text = _parse_xml_summary(text)
 
-                    attachment_info["text_content"] = text[:500]  # Limit size
+                    attachment_info["text_content"] = text[:500]  # Final size limit
             except Exception:
                 pass
 
@@ -156,6 +173,120 @@ def _parse_ics_summary(ics_text: str) -> str:
                     lines.append(f"{prefix.rstrip(':')}: {value}")
                 break
     return "\n".join(lines) if lines else "Calendar event"
+
+
+def _parse_csv_summary(csv_text: str, max_rows: int = 3) -> str:
+    """Extract headers and first few rows from CSV data."""
+    import csv
+    import io
+
+    try:
+        reader = csv.reader(io.StringIO(csv_text))
+        rows = list(reader)
+        if not rows:
+            return "Empty CSV"
+
+        # First row is usually headers
+        headers = rows[0]
+        summary_parts = [f"Columns: {', '.join(headers[:10])}"]  # Limit columns shown
+
+        # Show a few data rows
+        data_rows = rows[1 : max_rows + 1]
+        if data_rows:
+            summary_parts.append(f"Rows: {len(rows) - 1}")
+            for i, row in enumerate(data_rows, 1):
+                # Truncate each cell and limit columns
+                cells = [str(c)[:30] for c in row[:5]]
+                summary_parts.append(f"  Row {i}: {', '.join(cells)}")
+
+        return "\n".join(summary_parts)
+    except Exception:
+        # Fallback: just show first few lines
+        lines = csv_text.strip().split("\n")[:4]
+        return "\n".join(line[:100] for line in lines)
+
+
+def _parse_json_summary(json_text: str, max_keys: int = 10) -> str:
+    """Extract key structure from JSON data."""
+    import json
+
+    try:
+        data = json.loads(json_text)
+
+        def summarize(obj: object, depth: int = 0) -> str:
+            if depth > 2:  # Limit nesting depth
+                return "..."
+            if isinstance(obj, dict):
+                keys = list(obj.keys())[:max_keys]
+                if len(obj) > max_keys:
+                    keys.append(f"... +{len(obj) - max_keys} more")
+                parts = []
+                for k in keys[:max_keys]:
+                    if k.startswith("... +"):
+                        parts.append(k)
+                    else:
+                        v = obj[k]
+                        if isinstance(v, (dict, list)):
+                            parts.append(f"{k}: {summarize(v, depth + 1)}")
+                        else:
+                            val_str = str(v)[:50]
+                            parts.append(f"{k}: {val_str}")
+                return "{" + ", ".join(parts) + "}"
+            elif isinstance(obj, list):
+                if not obj:
+                    return "[]"
+                return f"[{len(obj)} items: {summarize(obj[0], depth + 1)}]"
+            else:
+                return str(obj)[:50]
+
+        return summarize(data)
+    except Exception:
+        # Fallback: first few lines
+        lines = json_text.strip().split("\n")[:5]
+        return "\n".join(line[:100] for line in lines)
+
+
+def _parse_xml_summary(xml_text: str) -> str:
+    """Extract structure summary from XML data."""
+    import re
+
+    try:
+        # Find root element
+        root_match = re.search(r"<(\w+)[>\s]", xml_text)
+        root = root_match.group(1) if root_match else "unknown"
+
+        # Find unique element names (limit to first portion of document)
+        sample = xml_text[:2000]
+        elements = re.findall(r"<(\w+)[>\s/]", sample)
+        unique_elements = []
+        seen = set()
+        for el in elements:
+            if el not in seen and el.lower() not in ("xml", "?xml"):
+                unique_elements.append(el)
+                seen.add(el)
+                if len(unique_elements) >= 10:
+                    break
+
+        # Look for key value patterns like <amount>123</amount>
+        values = []
+        for pattern in (
+            r"<(amount|total|price|quantity|date|name|id|status)>([^<]+)</",
+            r"<(Amount|Total|Price|Quantity|Date|Name|ID|Status)>([^<]+)</",
+        ):
+            for match in re.finditer(pattern, sample, re.IGNORECASE):
+                values.append(f"{match.group(1)}: {match.group(2)[:30]}")
+                if len(values) >= 5:
+                    break
+
+        parts = [f"Root: <{root}>", f"Elements: {', '.join(unique_elements)}"]
+        if values:
+            parts.append(f"Values: {'; '.join(values)}")
+
+        return "\n".join(parts)
+    except Exception:
+        # Fallback: first few lines
+        lines = xml_text.strip().split("\n")[:5]
+        return "\n".join(line[:100] for line in lines)
 
 
 class ImapMailbox:
