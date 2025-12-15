@@ -69,6 +69,5 @@ inbox-zero:
 		--copy \
 		--target-account imap \
 		--ollama-url http://gpu.local:11434 \
-		--force \
 		--concurrency 5
 

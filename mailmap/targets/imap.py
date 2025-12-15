@@ -136,10 +136,22 @@ class ImapTarget:
 
         # Use provided raw bytes or search for email on server
         raw_email = raw_bytes
+        source_folder = None
         if raw_email is None:
-            raw_email = await self._find_and_fetch_email(message_id)
-            if not raw_email:
+            location = await self._find_email(message_id)
+            if not location:
                 logger.warning(f"Email not found: {message_id}")
+                return False
+            source_folder, uid = location
+
+            # Skip if email is already in target folder
+            if source_folder == target_folder:
+                logger.debug(f"Email already in {target_folder}: {message_id}")
+                return True
+
+            raw_email = await self._fetch_email_by_uid(source_folder, uid)
+            if not raw_email:
+                logger.warning(f"Failed to fetch email: {message_id}")
                 return False
 
         # Append to target folder
@@ -263,11 +275,12 @@ class ImapTarget:
 
         return None
 
-    async def _find_and_fetch_email(self, message_id: str) -> bytes | None:
-        """Find and fetch raw email by Message-ID.
+    async def _fetch_email_by_uid(self, folder: str, uid: int) -> bytes | None:
+        """Fetch raw email by folder and UID.
 
         Args:
-            message_id: Message-ID header to search for
+            folder: Folder containing the email
+            uid: UID of the email
 
         Returns:
             Raw email bytes if found, None otherwise
@@ -275,11 +288,6 @@ class ImapTarget:
         if self._mailbox is None:
             return None
 
-        location = await self._find_email(message_id)
-        if not location:
-            return None
-
-        folder, uid = location
         loop = asyncio.get_event_loop()
         mailbox = self._mailbox  # Capture for lambda
 
@@ -299,6 +307,22 @@ class ImapTarget:
             return messages[uid][b"BODY[]"]
 
         return None
+
+    async def _find_and_fetch_email(self, message_id: str) -> bytes | None:
+        """Find and fetch raw email by Message-ID.
+
+        Args:
+            message_id: Message-ID header to search for
+
+        Returns:
+            Raw email bytes if found, None otherwise
+        """
+        location = await self._find_email(message_id)
+        if not location:
+            return None
+
+        folder, uid = location
+        return await self._fetch_email_by_uid(folder, uid)
 
     async def __aenter__(self) -> "ImapTarget":
         await self.connect()
