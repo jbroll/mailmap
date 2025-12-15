@@ -58,7 +58,11 @@ class TestThunderbirdConfig:
 
 
 class TestLoadConfig:
-    def test_load_config(self, sample_config_toml):
+    def test_load_config(self, sample_config_toml, monkeypatch):
+        # Clear username env var so it doesn't override config file value
+        # (password is set by fixture since it only comes from env vars)
+        monkeypatch.delenv("MAILMAP_IMAP_USERNAME", raising=False)
+
         config = load_config(sample_config_toml)
 
         assert config.imap.host == "imap.test.com"

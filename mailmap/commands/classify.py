@@ -30,12 +30,41 @@ class ProcessingStats:
     copied: int = 0
     failed: int = 0
     spam: int = 0
+    consecutive_failures: int = 0
+    stop_requested: bool = False
+    max_consecutive_failures: int = 5
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def increment(self, **kwargs: int) -> None:
         async with self._lock:
             for key, value in kwargs.items():
                 setattr(self, key, getattr(self, key) + value)
+
+    async def record_upload_result(self, success: bool) -> bool:
+        """Record upload success/failure and check if we should stop.
+
+        Args:
+            success: Whether the upload succeeded
+
+        Returns:
+            True if processing should stop due to too many consecutive failures
+        """
+        async with self._lock:
+            if success:
+                self.copied += 1
+                self.consecutive_failures = 0
+            else:
+                self.failed += 1
+                self.consecutive_failures += 1
+                if self.consecutive_failures >= self.max_consecutive_failures:
+                    self.stop_requested = True
+                    return True
+            return False
+
+    async def should_stop(self) -> bool:
+        """Check if processing should stop."""
+        async with self._lock:
+            return self.stop_requested
 
 
 async def _get_raw_bytes(email: UnifiedEmail) -> bytes | None:
@@ -78,6 +107,7 @@ async def _transfer_single_email(
     move: bool,
     stats: ProcessingStats,
     rate_limit: float = 1.0,
+    track_consecutive: bool = True,
 ) -> bool:
     """Transfer a pre-classified email to its destination folder with rate limiting.
 
@@ -88,6 +118,7 @@ async def _transfer_single_email(
         move: If True, move instead of copy
         stats: Stats tracker
         rate_limit: Minimum seconds between transfers (default: 1.0)
+        track_consecutive: If True, use shared consecutive failure tracking
 
     Returns:
         True if transfer succeeded, False otherwise.
@@ -107,15 +138,26 @@ async def _transfer_single_email(
 
         elapsed = time.time() - start_time
 
+        if track_consecutive:
+            should_stop = await stats.record_upload_result(success)
+        else:
+            if success:
+                await stats.increment(copied=1)
+            else:
+                await stats.increment(failed=1)
+            should_stop = False
+
         if success:
-            await stats.increment(copied=1)
             db.mark_as_transferred(email_record.message_id)
             logger.info(
                 f"  {action_past}: {email_record.subject[:40]}... -> {target_folder} [{elapsed:.1f}s]"
             )
         else:
-            await stats.increment(failed=1)
             logger.warning(f"  Failed to {action_past}: {email_record.message_id}")
+            if should_stop:
+                logger.error(
+                    f"Stopping after {stats.max_consecutive_failures} consecutive upload failures"
+                )
 
         # Rate limiting - ensure minimum time between operations
         if elapsed < rate_limit:
@@ -124,7 +166,10 @@ async def _transfer_single_email(
         return success
 
     except Exception as e:
-        await stats.increment(failed=1)
+        if track_consecutive:
+            await stats.record_upload_result(False)
+        else:
+            await stats.increment(failed=1)
         logger.warning(f"Failed to transfer {email_record.message_id}: {e}")
         return False
 
@@ -147,6 +192,10 @@ async def _process_single_email(
         (message_id, classification) tuple if successful, None otherwise.
     """
     async with semaphore:
+        # Check if we should stop due to previous failures
+        if await stats.should_stop():
+            return None
+
         action_past = "moved" if move else "copied"
         total_start = time.time()
 
@@ -171,6 +220,10 @@ async def _process_single_email(
 
             # Copy/move if target available
             if target:
+                # Check again before upload (may have changed during LLM call)
+                if await stats.should_stop():
+                    return (email.message_id, result.predicted_folder)
+
                 target_folder = (
                     result.predicted_folder
                     if result.confidence >= min_confidence
@@ -192,8 +245,10 @@ async def _process_single_email(
                 total_elapsed = time.time() - total_start
                 timing_info = f"[llm:{llm_elapsed:.1f}s raw:{raw_elapsed:.1f}s upload:{upload_elapsed:.1f}s total:{total_elapsed:.1f}s]"
 
+                # Record result and check for consecutive failures
+                should_stop = await stats.record_upload_result(success)
+
                 if success:
-                    await stats.increment(copied=1)
                     db.mark_as_transferred(email.message_id)
                     conf_str = (
                         f" ({result.confidence:.0%})"
@@ -204,8 +259,11 @@ async def _process_single_email(
                         f"  {action_past}: {email.subject[:40]}... -> {target_folder}{conf_str} {timing_info}"
                     )
                 else:
-                    await stats.increment(failed=1)
                     logger.warning(f"  Failed to {action_past}: {email.message_id} {timing_info}")
+                    if should_stop:
+                        logger.error(
+                            f"Stopping after {stats.max_consecutive_failures} consecutive upload failures"
+                        )
             else:
                 total_elapsed = time.time() - total_start
                 logger.debug(f"  classified: {email.subject[:40]}... -> {result.predicted_folder} [llm:{llm_elapsed:.1f}s total:{total_elapsed:.1f}s]")
@@ -294,8 +352,6 @@ async def bulk_classify(
     stats = ProcessingStats()
     start_time = time.time()
     semaphore = asyncio.Semaphore(concurrency)
-    consecutive_failures = 0
-    max_consecutive_failures = 5
 
     if concurrency > 1:
         logger.info(f"Using {concurrency} concurrent workers")
@@ -426,8 +482,19 @@ async def bulk_classify(
 
                         logger.info(f"  Classified {len(emails_to_classify)} emails from {folder_name}")
 
+                        # Check if we should stop due to consecutive failures
+                        if await stats.should_stop():
+                            logger.error(
+                                f"Exiting after {stats.max_consecutive_failures} consecutive upload failures"
+                            )
+                            break
+
                     # Process pre-classified emails needing transfer (rate-limited)
                     if target and emails_to_transfer:
+                        # Check if we should skip due to previous failures
+                        if await stats.should_stop():
+                            break
+
                         logger.info(f"  Transferring {len(emails_to_transfer)} pre-classified emails (rate: {rate_limit:.1f}s)...")
 
                         for i, email_record in enumerate(emails_to_transfer, 1):
@@ -441,17 +508,11 @@ async def bulk_classify(
                                 rate_limit=rate_limit,
                             )
                             if success:
-                                consecutive_failures = 0
                                 classifications.append((email_record.message_id, email_record.classification or "Unknown"))
-                            else:
-                                consecutive_failures += 1
-                                if consecutive_failures >= max_consecutive_failures:
-                                    logger.error(
-                                        f"Exiting after {max_consecutive_failures} consecutive failures"
-                                    )
-                                    break
+                            elif await stats.should_stop():
+                                break
 
-                        if consecutive_failures >= max_consecutive_failures:
+                        if await stats.should_stop():
                             break  # Exit folder loop too
 
                         logger.info(f"  Transferred {len(emails_to_transfer)} emails from {folder_name}")
@@ -565,13 +626,13 @@ async def transfer_emails(
 
         target = ImapTarget(config.imap)
         stats = ProcessingStats()
+        stats.max_consecutive_failures = max_consecutive_failures
         start_time = time.time()
-        consecutive_failures = 0
 
         async with target:
             for i, email_record in enumerate(untransferred, 1):
                 logger.info(f"[{i}/{len(untransferred)}] {email_record.subject[:50]}...")
-                success = await _transfer_single_email(
+                await _transfer_single_email(
                     email_record=email_record,
                     target=target,
                     db=db,
@@ -580,15 +641,8 @@ async def transfer_emails(
                     rate_limit=rate_limit,
                 )
 
-                if success:
-                    consecutive_failures = 0
-                else:
-                    consecutive_failures += 1
-                    if consecutive_failures >= max_consecutive_failures:
-                        logger.error(
-                            f"Exiting after {max_consecutive_failures} consecutive failures"
-                        )
-                        break
+                if await stats.should_stop():
+                    break
 
         elapsed = time.time() - start_time
         logger.info(f"Transfer complete: {stats.copied} transferred, {stats.failed} failed")
