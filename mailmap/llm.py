@@ -222,6 +222,7 @@ class OllamaClient:
         folder_descriptions: dict[str, str],
         confidence_threshold: float = 0.5,
         fallback_folder: str | None = None,
+        attachments: list[dict] | None = None,
     ) -> ClassificationResult:
         """Classify an email into one of the available folders.
 
@@ -232,6 +233,7 @@ class OllamaClient:
             folder_descriptions: Map of folder_id to description
             confidence_threshold: Minimum confidence for classification (0.0-1.0)
             fallback_folder: Folder to use when confidence is low
+            attachments: Optional list of attachment info dicts
 
         Returns:
             ClassificationResult with predicted folder, labels, and confidence
@@ -246,7 +248,14 @@ class OllamaClient:
             fallback_folder = "Unknown"
 
         # Clean email content before sending to LLM
-        cleaned = extract_email_summary(subject, from_addr, body, max_body_length=500)
+        cleaned = extract_email_summary(
+            subject, from_addr, body, max_body_length=500, attachments=attachments
+        )
+
+        # Format attachments section for prompt
+        attachments_section = ""
+        if cleaned.get("attachments"):
+            attachments_section = f"Attachments:\n{cleaned['attachments']}\n"
 
         prompt_template = load_prompt("classify_email")
         prompt = prompt_template.format(
@@ -254,6 +263,7 @@ class OllamaClient:
             from_addr=cleaned["from_addr"],
             subject=cleaned["subject"],
             body=cleaned["body"],
+            attachments_section=attachments_section,
         )
 
         response_text = await self._generate(prompt)

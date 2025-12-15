@@ -129,7 +129,8 @@ def extract_email_summary(
     subject: str,
     from_addr: str,
     body: str,
-    max_body_length: int = 300
+    max_body_length: int = 300,
+    attachments: list[dict] | None = None,
 ) -> dict[str, str]:
     """Extract a clean summary of an email for LLM analysis.
 
@@ -138,9 +139,10 @@ def extract_email_summary(
         from_addr: From address (may include name)
         body: Email body text
         max_body_length: Maximum body preview length
+        attachments: Optional list of attachment info dicts
 
     Returns:
-        Dict with cleaned subject, from_addr, and body
+        Dict with cleaned subject, from_addr, body, and attachments
     """
     # Clean subject - remove Re:, Fwd:, etc. (may be multiple)
     clean_subject = subject or ""
@@ -162,8 +164,27 @@ def extract_email_summary(
     # Clean body
     clean_body = clean_email_content(body, max_body_length)
 
+    # Format attachment info
+    attachments_text = ""
+    if attachments:
+        attachment_parts = []
+        for att in attachments:
+            filename = att.get("filename", "unnamed")
+            content_type = att.get("content_type", "")
+            text_content = att.get("text_content")
+
+            if text_content:
+                # Include parsed content for text-based attachments
+                attachment_parts.append(f"- {filename} ({content_type}):\n  {text_content}")
+            else:
+                attachment_parts.append(f"- {filename} ({content_type})")
+
+        if attachment_parts:
+            attachments_text = "\n".join(attachment_parts)
+
     return {
         "subject": clean_subject,
         "from_addr": clean_from,
         "body": clean_body,
+        "attachments": attachments_text,
     }

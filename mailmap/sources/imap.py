@@ -107,6 +107,7 @@ class ImapSource:
                     from_addr=email_msg.from_addr,
                     body_text=email_msg.body_text,
                     uid=email_msg.uid,
+                    attachments=email_msg.attachments,
                 )
 
     async def __aenter__(self) -> "ImapSource":

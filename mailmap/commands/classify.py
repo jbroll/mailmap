@@ -158,6 +158,7 @@ async def _process_single_email(
                 email.from_addr,
                 email.body_text,
                 folder_descriptions,
+                attachments=email.attachments,
             )
             llm_elapsed = time.time() - llm_start
 

@@ -111,6 +111,7 @@ class EmailProcessor:
                 message.from_addr,
                 message.body_text,
                 folder_descriptions,
+                attachments=message.attachments,
             )
 
         self.db.update_classification(

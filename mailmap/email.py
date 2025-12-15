@@ -24,6 +24,7 @@ class UnifiedEmail:
     source_ref: Any = None  # uid (IMAP) or mbox_path (Thunderbird)
     headers: dict[str, str] = field(default_factory=dict)
     raw_bytes: bytes | None = None  # Raw email content for cross-server transfers
+    attachments: list[dict] | None = None  # List of {filename, content_type, text_content}
 
     @classmethod
     def from_thunderbird(cls, tb_email: "ThunderbirdEmail") -> "UnifiedEmail":
@@ -50,6 +51,7 @@ class UnifiedEmail:
         body_text: str,
         uid: int,
         headers: dict[str, str] | None = None,
+        attachments: list[dict] | None = None,
     ) -> "UnifiedEmail":
         """Create UnifiedEmail from IMAP fetch result."""
         return cls(
@@ -61,6 +63,7 @@ class UnifiedEmail:
             source_type="imap",
             source_ref=uid,
             headers=headers or {},
+            attachments=attachments,
         )
 
     @classmethod

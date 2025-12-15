@@ -124,6 +124,6 @@ Now classify this email following the same reasoning process:
 From: {from_addr}
 Subject: {subject}
 Body: {body}
-
+{attachments_section}
 Respond with your reasoning, then the classification as a JSON object:
 {{"predicted_folder": "...", "secondary_labels": [...], "confidence": ...}}

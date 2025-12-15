@@ -11,6 +11,7 @@ from mailmap.imap_client import (
     EmailMessage,
     ImapMailbox,
     decode_mime_header,
+    extract_attachments,
     extract_body,
 )
 
@@ -350,6 +351,162 @@ class TestImapMailboxOperations:
         result = mailbox.fetch_raw_email(999, "INBOX")
 
         assert result is None
+
+
+class TestExtractAttachments:
+    """Tests for extract_attachments function."""
+
+    def test_no_attachments_simple_message(self):
+        """Test email with no attachments."""
+        raw = b"Content-Type: text/plain\r\n\r\nSimple body"
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert result == []
+
+    def test_multipart_no_attachments(self):
+        """Test multipart message with only body parts (no attachments)."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Plain text body
+--boundary
+Content-Type: text/html
+
+<html><body>HTML body</body></html>
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert result == []
+
+    def test_text_attachment(self):
+        """Test extracting a plain text attachment."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Body text
+--boundary
+Content-Type: text/plain; name="notes.txt"
+Content-Disposition: attachment; filename="notes.txt"
+
+These are my notes.
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["filename"] == "notes.txt"
+        assert result[0]["content_type"] == "text/plain"
+        assert "These are my notes" in result[0]["text_content"]
+
+    def test_ics_calendar_attachment(self):
+        """Test extracting and parsing ICS calendar attachment."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+You have a new booking
+--boundary
+Content-Type: text/calendar; name="schedule.ics"
+Content-Disposition: attachment; filename="schedule.ics"
+
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+SUMMARY:Yoga Class with John
+LOCATION:Studio A
+DTSTART:20241215T100000Z
+ORGANIZER:mailto:yoga@example.com
+END:VEVENT
+END:VCALENDAR
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["filename"] == "schedule.ics"
+        assert result[0]["content_type"] == "text/calendar"
+        text = result[0]["text_content"]
+        assert "SUMMARY: Yoga Class with John" in text
+        assert "LOCATION: Studio A" in text
+
+    def test_ics_without_filename_defaults_to_calendar(self):
+        """Test ICS attachment without filename gets default name."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Body
+--boundary
+Content-Type: text/calendar
+
+BEGIN:VCALENDAR
+BEGIN:VEVENT
+SUMMARY:Meeting
+END:VEVENT
+END:VCALENDAR
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["filename"] == "calendar.ics"
+
+    def test_binary_attachment_no_text_content(self):
+        """Test binary attachment has no text_content extracted."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Body
+--boundary
+Content-Type: application/pdf; name="document.pdf"
+Content-Disposition: attachment; filename="document.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert len(result) == 1
+        assert result[0]["filename"] == "document.pdf"
+        assert result[0]["content_type"] == "application/pdf"
+        assert result[0]["text_content"] is None
+
+    def test_multiple_attachments(self):
+        """Test email with multiple attachments."""
+        raw = b"""MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Body
+--boundary
+Content-Type: text/plain; name="notes.txt"
+Content-Disposition: attachment; filename="notes.txt"
+
+Note content
+--boundary
+Content-Type: application/pdf; name="doc.pdf"
+Content-Disposition: attachment; filename="doc.pdf"
+
+binary
+--boundary--"""
+        msg = email.message_from_bytes(raw)
+        result = extract_attachments(msg)
+        assert len(result) == 2
+        filenames = [a["filename"] for a in result]
+        assert "notes.txt" in filenames
+        assert "doc.pdf" in filenames
 
 
 class TestFetchAllMessageIds:

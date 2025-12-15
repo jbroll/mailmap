@@ -24,6 +24,7 @@ class EmailMessage:
     from_addr: str
     body_text: str
     uid: int
+    attachments: list[dict] | None = None  # List of {filename, content_type, text_content}
 
 
 def decode_mime_header(header: str | None) -> str:
@@ -46,6 +47,10 @@ def extract_body(msg: email.message.Message) -> str:
         for part in msg.walk():
             content_type = part.get_content_type()
             if content_type == "text/plain":
+                # Skip attachments - only get inline body text
+                disposition = part.get("Content-Disposition", "")
+                if "attachment" in disposition:
+                    continue
                 payload = part.get_payload(decode=True)
                 if isinstance(payload, bytes):
                     charset = part.get_content_charset() or "utf-8"
@@ -53,6 +58,9 @@ def extract_body(msg: email.message.Message) -> str:
         for part in msg.walk():
             content_type = part.get_content_type()
             if content_type == "text/html":
+                disposition = part.get("Content-Disposition", "")
+                if "attachment" in disposition:
+                    continue
                 payload = part.get_payload(decode=True)
                 if isinstance(payload, bytes):
                     charset = part.get_content_charset() or "utf-8"
@@ -63,6 +71,91 @@ def extract_body(msg: email.message.Message) -> str:
             charset = msg.get_content_charset() or "utf-8"
             return payload.decode(charset, errors="replace")
     return ""
+
+
+def extract_attachments(msg: email.message.Message) -> list[dict[str, str | None]]:
+    """Extract attachment metadata and text content from email.
+
+    Returns list of attachment info dicts with:
+    - filename: Name of the attachment
+    - content_type: MIME type
+    - text_content: Extracted text for parseable types (.ics, .txt, .vcf)
+    """
+    attachments: list[dict[str, str | None]] = []
+
+    if not msg.is_multipart():
+        return attachments
+
+    for part in msg.walk():
+        content_type = part.get_content_type()
+        disposition = part.get("Content-Disposition", "")
+        filename = part.get_filename()
+
+        # Skip main body parts (inline text/html without filename)
+        if (
+            not filename
+            and "attachment" not in disposition
+            and content_type in ("text/plain", "text/html")
+        ):
+            continue
+
+        # Get filename from Content-Type if not in Content-Disposition
+        if not filename:
+            # Try to get from content-type params
+            name_param = part.get_param("name")
+            if isinstance(name_param, str):
+                filename = name_param
+            elif isinstance(name_param, tuple):
+                # Encoded parameter: (charset, language, value)
+                filename = name_param[2]
+
+        if not filename and content_type == "text/calendar":
+            filename = "calendar.ics"
+
+        if not filename:
+            continue
+
+        attachment_info = {
+            "filename": filename,
+            "content_type": content_type,
+            "text_content": None,
+        }
+
+        # Parse text-based attachments
+        if content_type in ("text/calendar", "text/plain", "text/x-vcard", "text/vcard"):
+            try:
+                payload = part.get_payload(decode=True)
+                if isinstance(payload, bytes):
+                    charset = part.get_content_charset() or "utf-8"
+                    text = payload.decode(charset, errors="replace")
+
+                    # For calendar files, extract key fields
+                    if content_type == "text/calendar":
+                        text = _parse_ics_summary(text)
+
+                    attachment_info["text_content"] = text[:500]  # Limit size
+            except Exception:
+                pass
+
+        attachments.append(attachment_info)
+
+    return attachments
+
+
+def _parse_ics_summary(ics_text: str) -> str:
+    """Extract key fields from ICS calendar data."""
+    lines = []
+    for line in ics_text.split("\n"):
+        line = line.strip()
+        # Extract useful fields
+        for prefix in ("SUMMARY:", "LOCATION:", "DTSTART", "ORGANIZER", "CATEGORIES:"):
+            if line.upper().startswith(prefix):
+                # Clean up the value
+                value = line.split(":", 1)[-1].strip()
+                if value:
+                    lines.append(f"{prefix.rstrip(':')}: {value}")
+                break
+    return "\n".join(lines) if lines else "Calendar event"
 
 
 class ImapMailbox:
@@ -116,6 +209,7 @@ class ImapMailbox:
         subject = decode_mime_header(msg.get("Subject"))
         from_addr = decode_mime_header(msg.get("From"))
         body = extract_body(msg)
+        attachments = extract_attachments(msg)
 
         return EmailMessage(
             message_id=message_id,
@@ -124,6 +218,7 @@ class ImapMailbox:
             from_addr=from_addr,
             body_text=body,
             uid=uid,
+            attachments=attachments if attachments else None,
         )
 
     def fetch_raw_email(self, uid: int, folder: str) -> bytes | None:
