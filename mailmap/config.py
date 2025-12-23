@@ -39,7 +39,7 @@ class ImapConfig:
 @dataclass
 class OllamaConfig:
     base_url: str = "http://localhost:11434"
-    model: str = "qwen2.5:7b"
+    model: str = "qwen2.5:14b"
     timeout_seconds: int = 300  # 5 minutes for large batches
 
 

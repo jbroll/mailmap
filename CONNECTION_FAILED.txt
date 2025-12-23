@@ -1,0 +1,34 @@
+2025-12-14 20:20:49,901 - mailmap - INFO -   copied: Electric City Communty Grocery - Busy Pa... -> Personal (95%) [llm:7.0s raw:0.0s upload:0.2s total:7.2s]
+2025-12-14 20:20:50,703 - httpx - INFO - HTTP Request: POST http://gpu.local:11434/api/generate "HTTP/1.1 200 OK"
+2025-12-14 20:20:51,711 - httpx - INFO - HTTP Request: POST http://gpu.local:11434/api/generate "HTTP/1.1 200 OK"
+2025-12-14 20:20:52,822 - httpx - INFO - HTTP Request: POST http://gpu.local:11434/api/generate "HTTP/1.1 200 OK"
+2025-12-14 20:20:53,810 - httpx - INFO - HTTP Request: POST http://gpu.local:11434/api/generate "HTTP/1.1 200 OK"
+2025-12-14 20:20:55,458 - httpx - INFO - HTTP Request: POST http://gpu.local:11434/api/generate "HTTP/1.1 200 OK"
+2025-12-14 20:20:57,372 - mailmap - INFO -   copied: Sad News about my Mom... -> Personal (95%) [llm:4.8s raw:0.0s upload:6.7s total:11.5s]
+2025-12-14 20:21:00,234 - httpx - INFO - HTTP Request: POST http://gpu.local:11434/api/generate "HTTP/1.1 200 OK"
+2025-12-14 20:21:00,886 - mailmap.targets.imap - WARNING - Connection error copying <3C44E8B3-C092-45FF-9E50-4FBD1C35241D@gmail.com>: unexpected response: b'/table> BAD failed. Unknown command.'. Reconnecting in 1.0s (attempt 1/3)...
+2025-12-14 20:21:00,886 - mailmap.targets.imap - WARNING - Connection error copying <4bdcdeb3-0de0-4e97-86d0-37dc716ae3a8@atl1s11mta260.xt.local>: command: APPEND => unexpected response: b'</td> BAD failed. Unknown command.'. Reconnecting in 1.0s (attempt 1/3)...
+2025-12-14 20:21:00,887 - mailmap.targets.imap - WARNING - Connection error copying <1045342915.4899991.1693882824787@mail.yahoo.com>: unexpected response: b'</tr> BAD failed. Unknown command.'. Reconnecting in 1.0s (attempt 1/3)...
+2025-12-14 20:21:00,887 - mailmap.targets.imap - WARNING - Connection error copying <699c72b7.AUkAAGFx1AEAAAAAAAAAAMBe58YAAYCrzNwAAAAAABJOPQBjD4Gd@mailjet.com>: unexpected response: b'</table> BAD failed. Unknown command.'. Reconnecting in 1.0s (attempt 1/3)...
+2025-12-14 20:21:00,888 - mailmap.targets.imap - WARNING - Connection error copying <DB9P190MB1723A211A59068D9686DA7FEE6369@DB9P190MB1723.EURP190.PROD.OUTLOOK.COM>: unexpected response: b'</body> BAD failed. Unknown command.'. Reconnecting in 1.0s (attempt 1/3)...
+2025-12-14 20:21:01,890 - mailmap.targets.imap - INFO - Attempting IMAP reconnection...
+2025-12-14 20:21:01,890 - mailmap.targets.imap - INFO - Attempting IMAP reconnection...
+2025-12-14 20:21:01,890 - mailmap.targets.imap - INFO - Attempting IMAP reconnection...
+2025-12-14 20:21:01,890 - mailmap.targets.imap - INFO - Attempting IMAP reconnection...
+2025-12-14 20:21:01,890 - mailmap.targets.imap - INFO - Attempting IMAP reconnection...
+2025-12-14 20:21:02,376 - mailmap.targets.imap - INFO - IMAP target connected to imap.purelymail.com
+2025-12-14 20:21:02,376 - mailmap.targets.imap - INFO - IMAP reconnection successful
+2025-12-14 20:21:02,376 - mailmap.targets.imap - ERROR - Failed to copy <699c72b7.AUkAAGFx1AEAAAAAAAAAAMBe58YAAYCrzNwAAAAAABJOPQBjD4Gd@mailjet.com>: command LIST illegal in state NONAUTH, only allowed in states AUTH, SELECTED
+2025-12-14 20:21:02,376 - mailmap - WARNING -   Failed to copied: <699c72b7.AUkAAGFx1AEAAAAAAAAAAMBe58YAAYCrzNwAAAAAABJOPQBjD4Gd@mailjet.com> [llm:2.9s raw:0.0s upload:2.1s total:5.0s]
+2025-12-14 20:21:02,393 - mailmap.targets.imap - INFO - IMAP target connected to imap.purelymail.com
+2025-12-14 20:21:02,393 - mailmap.targets.imap - INFO - IMAP reconnection successful
+2025-12-14 20:21:02,393 - mailmap.targets.imap - ERROR - Failed to copy <4bdcdeb3-0de0-4e97-86d0-37dc716ae3a8@atl1s11mta260.xt.local>: command LIST illegal in state NONAUTH, only allowed in states AUTH, SELECTED
+2025-12-14 20:21:02,393 - mailmap - WARNING -   Failed to copied: <4bdcdeb3-0de0-4e97-86d0-37dc716ae3a8@atl1s11mta260.xt.local> [llm:4.9s raw:0.0s upload:10.7s total:15.6s]
+2025-12-14 20:21:02,444 - mailmap.targets.imap - INFO - IMAP target connected to imap.purelymail.com
+2025-12-14 20:21:02,445 - mailmap.targets.imap - INFO - IMAP reconnection successful
+2025-12-14 20:21:02,447 - mailmap.targets.imap - INFO - IMAP target connected to imap.purelymail.com
+2025-12-14 20:21:02,447 - mailmap.targets.imap - INFO - IMAP reconnection successful
+2025-12-14 20:21:02,458 - mailmap.targets.imap - INFO - IMAP target connected to imap.purelymail.com
+2025-12-14 20:21:02,459 - mailmap.targets.imap - INFO - IMAP reconnection successful
+2025-12-14 20:21:05,224 - httpx - INFO - HTTP Request: POST http://gpu.local:11434/api/generate "HTTP/1.1 200 OK"
+2025-12-14 20:21:06,271 - httpx - INFO - HTTP Request: POST http://gpu.local:11434/api/generate "HTTP/1.1 200 OK"
