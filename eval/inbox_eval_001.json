@@ -1,0 +1,546 @@
+[
+  {
+    "index": 0,
+    "message_id": "<a8KwwfYwSNy4y1_dG1qB6w@geopod-ismtpd-47>",
+    "date": "Wed, 24 Dec 2025 04:39:56 +0000 (UTC)",
+    "from_addr": "Anthropic <no-reply-82RUvcbLbP71Ph0uZ797WQ@mail.anthropic.com>",
+    "subject": "Secure link to log in to Claude.ai |  2025-12-23 23:39:56",
+    "body_preview": "96 Let's get you signed in Sign in with the secure link below Sign in to Claude.ai If you didn't request this email, you can safely ignore it. If you'",
+    "claude": {
+      "predicted_folder": "Newsletters",
+      "confidence": 0.5,
+      "reason": "Email doesn't match specific categories; treated as general newsletter or update."
+    },
+    "ollama": {
+      "predicted_folder": "AccountSecurity",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"AccountSecurity\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.95}\n\nThe email is from an automated system (Anthropic) with a no-reply address, containing a secure login link for Claude.ai. The primary intent is to facilitate account access verification, which aligns "
+    },
+    "agreement": false
+  },
+  {
+    "index": 1,
+    "message_id": "<autogen-java-654cf79a-6e54-470e-b185-e979785567b5@google.com>",
+    "date": "Tue, 23 Dec 2025 23:55:18 +0000",
+    "from_addr": "Google <noreply@google.com>",
+    "subject": "Google Verification Code",
+    "body_preview": "Google Verification Code\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\nHi John,\r\n\r\nWe received a request to access your Google Account  \r\njohnnyroller1725@gmail.com through your",
+    "claude": {
+      "predicted_folder": "AccountSecurity",
+      "confidence": 0.93,
+      "reason": "Email contains a security code, login alert, or password reset request."
+    },
+    "ollama": {
+      "predicted_folder": "AccountSecurity",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"AccountSecurity\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.95}\n\nThe email is from Google's automated system, requesting a verification code for account access, which directly matches the AccountSecurity folder's purpose of handling security actions like verificat"
+    },
+    "agreement": true
+  },
+  {
+    "index": 2,
+    "message_id": "<x0dnIwIkYNoubhcprAFNkg@notifications.google.com>",
+    "date": "Tue, 23 Dec 2025 23:55:51 GMT",
+    "from_addr": "Google <no-reply@accounts.google.com>",
+    "subject": "Your Google Account was recovered successfully",
+    "body_preview": "[image: Google]\r\nAccount recovered successfully\r\n\r\n\r\njohnnyroller1725@gmail.com\r\nWelcome back to your accountIf you suspect you were locked out of you",
+    "claude": {
+      "predicted_folder": "LocalPolitics",
+      "confidence": 0.82,
+      "reason": "Email is from a political campaign or civic advocacy organization."
+    },
+    "ollama": {
+      "predicted_folder": "AccountSecurity",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"AccountSecurity\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.95}\n\nThe email is from Google's automated system, notifying the recipient that their account was successfully recovered. This directly aligns with the AccountSecurity folder, which handles security-relate"
+    },
+    "agreement": false
+  },
+  {
+    "index": 3,
+    "message_id": "<OGyYWb5v5Nyg22BHZL-g9Q@notifications.google.com>",
+    "date": "Tue, 23 Dec 2025 23:55:51 GMT",
+    "from_addr": "Google <no-reply@accounts.google.com>",
+    "subject": "Security alert",
+    "body_preview": "[image: Google]\r\nNew sign-in to your account\r\n\r\n\r\njohnnyroller1725@gmail.com\r\nWe noticed a new sign-in to your Google Account. If this was you, you do",
+    "claude": {
+      "predicted_folder": "AccountSecurity",
+      "confidence": 0.93,
+      "reason": "Email contains a security code, login alert, or password reset request."
+    },
+    "ollama": {
+      "predicted_folder": "AccountSecurity",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"AccountSecurity\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.95}\n\nThe email is from Google's automated system, notifying the recipient of a potential security threat (unauthorized sign-in). This matches the AccountSecurity folder's purpose of alerting about account"
+    },
+    "agreement": true
+  },
+  {
+    "index": 4,
+    "message_id": "<0101019b4da043ca-07bcac75-9ed6-4b2c-a6e1-a78c3ae9f964-000000@us-west-2.amazonses.com>",
+    "date": "Tue, 23 Dec 2025 23:51:47 +0000",
+    "from_addr": "Mozilla <accounts@firefox.com>",
+    "subject": "New sign-in to Firefox for Android",
+    "body_preview": "\r\n\r\nYour Mozilla account was used to sign in\r\n\r\nBoulder, CO, United States (estimated)\r\nTuesday, Dec 23, 2025\r\n4:51:46 PM (MST)\r\n\r\nNot you? Change you",
+    "claude": {
+      "predicted_folder": "AccountSecurity",
+      "confidence": 0.93,
+      "reason": "Email contains a security code, login alert, or password reset request."
+    },
+    "ollama": {
+      "predicted_folder": "AccountSecurity",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"AccountSecurity\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.95}\n\nThe email is from Mozilla's accounts team, notifying the recipient of a new sign-in to their Firefox account. This matches the AccountSecurity folder's purpose of alerting about security-related even"
+    },
+    "agreement": true
+  },
+  {
+    "index": 5,
+    "message_id": "<0101019b4d9c7d38-f424af1c-3a71-43ca-bf94-5e1a825ea97a-000000@us-west-2.amazonses.com>",
+    "date": "Tue, 23 Dec 2025 23:47:39 +0000",
+    "from_addr": "Mozilla <accounts@firefox.com>",
+    "subject": "Your password has been reset",
+    "body_preview": "\r\n\r\nYour password has been reset\r\n\r\nYou reset your Mozilla account password on:\r\n\r\nFirefox on Linux\r\n\r\nTuesday, Dec 23, 2025\r\n11:47:39 PM (UTC)\r\n\r\nYou",
+    "claude": {
+      "predicted_folder": "RKRoll",
+      "confidence": 0.88,
+      "reason": "Email is business correspondence addressed to RKRoll.com as a company."
+    },
+    "ollama": {
+      "predicted_folder": "AccountSecurity",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"AccountSecurity\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.95}\n\nThe email is from Mozilla's automated account system, informing the recipient their password was reset and prompting them to create a recovery key. This directly matches the AccountSecurity folder's "
+    },
+    "agreement": false
+  },
+  {
+    "index": 6,
+    "message_id": "<0101019b4d9b737e-7e34ee60-324a-4877-a612-b67a7c6d4dd1-000000@us-west-2.amazonses.com>",
+    "date": "Tue, 23 Dec 2025 23:46:31 +0000",
+    "from_addr": "Mozilla <accounts@firefox.com>",
+    "subject": "Use 23500937 to change your password",
+    "body_preview": "\r\n\r\nForgot your password?\r\n\r\nWe received a request for a password change on your Mozilla account from:\r\n\r\nFirefox on Linux\r\nBoulder, CO, United States",
+    "claude": {
+      "predicted_folder": "Personal",
+      "confidence": 0.6,
+      "reason": "Email appears to be from an individual person sending direct correspondence."
+    },
+    "ollama": {
+      "predicted_folder": "AccountSecurity",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"AccountSecurity\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.95}\n\nThe email is from Mozilla's automated account system, requesting a password change confirmation code, which directly matches the AccountSecurity folder's purpose of handling security actions like pas"
+    },
+    "agreement": false
+  },
+  {
+    "index": 7,
+    "message_id": "<CAKmydQ3FVT52+yYDSpU0ak3Ba+=7x3ea+rKXTx+J17TQ9_4ECg@mail.gmail.com>",
+    "date": "Mon, 22 Dec 2025 11:01:39 -0700",
+    "from_addr": "Rachel Roll <rkroll@rkroll.com>",
+    "subject": "Re: Major incident declared over Shropshire canal 'sinkhole'",
+    "body_preview": "Wow! We were on that stretch of canal 2 years ago!\r\n\r\nOn Mon, Dec 22, 2025 at 5:30 AM Fabio Corsi <corsif@gmail.com> wrote:\r\n\r\n> Thought you might be ",
+    "claude": {
+      "predicted_folder": "RKRoll",
+      "confidence": 0.88,
+      "reason": "Email is business correspondence addressed to RKRoll.com as a company."
+    },
+    "ollama": {
+      "predicted_folder": "Personal",
+      "secondary_labels": [],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"Personal\", \"secondary_labels\": [], \"confidence\": 0.95}\n\nThe email is a personal response from Rachel Roll to a shared article about a canal incident, reflecting a casual human correspondence. While the subject references a news article, the body contains a direct personal anecd"
+    },
+    "agreement": false
+  },
+  {
+    "index": 8,
+    "message_id": "<CALG7nL4nbNKNW2+bA0fyv9utu1kgf+rp1eyDocNq6jRs5XPToA@mail.gmail.com>",
+    "date": "Mon, 22 Dec 2025 06:37:37 -0600",
+    "from_addr": "Ann Pearson <atpearson1381@gmail.com>",
+    "subject": "Re: Major incident declared over Shropshire canal 'sinkhole'",
+    "body_preview": "Hmmm....Thanks for sharing?? And here I thought we had a very safe trip\r\nplanned  😂\r\n\r\nOn Mon, Dec 22, 2025 at 6:30 AM Fabio Corsi <corsif@gmail.com> ",
+    "claude": {
+      "predicted_folder": "Personal",
+      "confidence": 0.6,
+      "reason": "Email appears to be from an individual person sending direct correspondence."
+    },
+    "ollama": {
+      "predicted_folder": "Personal",
+      "secondary_labels": [
+        "Newsletters"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"Personal\", \"secondary_labels\": [\"Newsletters\"], \"confidence\": 0.95}\n\nThe email is a casual, informal response from an individual (Ann Pearson) to another individual (Fabio Corsi) sharing a news article. The primary intent is personal correspondence, not transactional, promotion"
+    },
+    "agreement": true
+  },
+  {
+    "index": 9,
+    "message_id": "<EA10C4E3-2EC9-4B7A-BE17-DAE740557833@gmail.com>",
+    "date": "Mon, 22 Dec 2025 07:43:02 -0500",
+    "from_addr": "Fabio Corsi <corsif@gmail.com>",
+    "subject": "Re: Major incident declared over Shropshire canal 'sinkhole'",
+    "body_preview": "Though It would make quite a story for the long winter nights around the fireplace… 🤪 On Dec 22, 2025, at 7:37 AM, Ann Pearson <atpearson1381@gmail.co",
+    "claude": {
+      "predicted_folder": "Personal",
+      "confidence": 0.6,
+      "reason": "Email appears to be from an individual person sending direct correspondence."
+    },
+    "ollama": {
+      "predicted_folder": "Personal",
+      "secondary_labels": [],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"Personal\", \"secondary_labels\": [], \"confidence\": 0.95}\n\nThe email is a direct message from an individual (Fabio Corsi) sharing a news article with a personal acquaintance (Ann Pearson), using informal language and emojis. It fits the \"Personal\" folder as it's a private human-to"
+    },
+    "agreement": true
+  },
+  {
+    "index": 10,
+    "message_id": "<157248617.16736382.1766394348703@cell-5-69bbb77647-dzvld>",
+    "date": "Mon, 22 Dec 2025 09:05:48 +0000 (GMT)",
+    "from_addr": "Proctors <info@proctors.org>",
+    "subject": "Laugh Your Way Into the New Year",
+    "body_preview": "First Night of Funny Returns!https://www.proctors.org \r\n\r\nhttps://www.atproctors.org/event/the-first-night-of-funny-3/ \r\n\r\nBUY TICKETS https://www.atp",
+    "claude": {
+      "predicted_folder": "Events",
+      "confidence": 0.8,
+      "reason": "Email is about a specific event or gathering with a date and time."
+    },
+    "ollama": {
+      "predicted_folder": "Events",
+      "secondary_labels": [
+        "Community"
+      ],
+      "confidence": 0.8,
+      "raw_response": "{\"predicted_folder\": \"Events\", \"secondary_labels\": [\"Community\"], \"confidence\": 0.8}\n\nThe email promotes a specific event (\"First Night of Funny\") with a clear date (New Year's Eve) and purpose (comedy show), aligning with the \"Events\" folder's definition of invitations to scheduled occasions. While"
+    },
+    "agreement": true
+  },
+  {
+    "index": 11,
+    "message_id": "<E7B00960-35B6-40EA-B7DC-EB24628DFB08@gmail.com>",
+    "date": "Mon, 22 Dec 2025 07:30:24 -0500",
+    "from_addr": "Fabio Corsi <corsif@gmail.com>",
+    "subject": "Major incident declared over Shropshire canal 'sinkhole'",
+    "body_preview": "Thought you might be interested in this article… never know what nature will throw at you… \r\n\r\nHappy Holidays!!\r\n\r\nFabio\r\n\r\nhttps://www.bbc.com/news/a",
+    "claude": {
+      "predicted_folder": "Personal",
+      "confidence": 0.6,
+      "reason": "Email appears to be from an individual person sending direct correspondence."
+    },
+    "ollama": {
+      "predicted_folder": "Personal",
+      "secondary_labels": [
+        "Newsletters"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"Personal\", \"secondary_labels\": [\"Newsletters\"], \"confidence\": 0.95}\n\nThe email is from an individual (Fabio Corsi) sharing a news article link, indicating personal correspondence. While the content references a news article, the primary intent is direct human communication rath"
+    },
+    "agreement": true
+  },
+  {
+    "index": 12,
+    "message_id": "<Boc_HxLPTaOkjbLOKWsZlQ@geopod-ismtpd-35>",
+    "date": "Sat, 20 Dec 2025 20:00:00 +0000 (UTC)",
+    "from_addr": "Lauren Mullen <lmullen@artstudentsleague.org>",
+    "subject": "Art Should Be Accessible to Everyone",
+    "body_preview": "See how we’re expanding opportunity for artists of all backgrounds.\r\nUnsubscribe From This List https://u29406380.ct.sendgrid.net/asm/unsubscribe/?use",
+    "claude": {
+      "predicted_folder": "Newsletters",
+      "confidence": 0.75,
+      "reason": "Email is a subscribed newsletter delivering ongoing content."
+    },
+    "ollama": {
+      "predicted_folder": "Community",
+      "secondary_labels": [
+        "Newsletters"
+      ],
+      "confidence": 0.85,
+      "raw_response": "{\"predicted_folder\": \"Community\", \"secondary_labels\": [\"Newsletters\"], \"confidence\": 0.85}\n\nThe email is from an organization (Art Students League) about expanding opportunities for artists, which aligns with the \"Community\" folder's focus on community organization announcements. The unsubscribe lin"
+    },
+    "agreement": false
+  },
+  {
+    "index": 13,
+    "message_id": "<OF3503DE7B.A11D5583-ON88258D65.00827E2B-88258D65.00828032@calance.com>",
+    "date": "Fri, 19 Dec 2025 15:45:24 -0800",
+    "from_addr": "Shiva Mittal <smittal@calancejobs.com>",
+    "subject": "Sr. Software Engineer - Remote",
+    "body_preview": "\r\nYou are receiving this email because we have your resume in our system.  If\r\nyou would like to be removed please take a moment and opt-out at the bo",
+    "claude": {
+      "predicted_folder": "Career",
+      "confidence": 0.85,
+      "reason": "Email is about a job opportunity or recruiting outreach."
+    },
+    "ollama": {
+      "predicted_folder": "Career",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"Career\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.95}\n\nThe email is from a recruitment platform (calancejobs.com) offering a job opportunity, which aligns with the \"Career\" folder's purpose of employment-related communications. While the sender is a digital servi"
+    },
+    "agreement": true
+  },
+  {
+    "index": 14,
+    "message_id": "<cf8fedf8faeedfa1c73369b53.f1d65ddd29.20251219222213.9784ab235f.db6f0166@mail82.use2001.mcdlv.net>",
+    "date": "Fri, 19 Dec 2025 22:22:24 +0000",
+    "from_addr": "WebThings <team@webthings.io>",
+    "subject": "📢 Announcing WebThings Gateway 2.0",
+    "body_preview": "View this email in your browser (https://mailchi.mp/87a1fdcf3903/announcing-webthings-gateway-14192494?e=f1d65ddd29)\r\n\r\n\r\n** Announcing WebThings Gate",
+    "claude": {
+      "predicted_folder": "Shopping",
+      "confidence": 0.78,
+      "reason": "Email is from a retailer showing products to consider buying."
+    },
+    "ollama": {
+      "predicted_folder": "Newsletters",
+      "secondary_labels": [
+        "Promotions"
+      ],
+      "confidence": 0.75,
+      "raw_response": "{\"predicted_folder\": \"Newsletters\", \"secondary_labels\": [\"Promotions\"], \"confidence\": 0.75}\n\n**Reasoning:** The email is from an organization (WebThings) announcing a product update (Gateway 2.0), which aligns with \"Newsletters\" as it delivers information to subscribers. While \"Promotions\" might loo"
+    },
+    "agreement": false
+  },
+  {
+    "index": 15,
+    "message_id": "<7bf89c66-0dc8-4ed4-b0c5-af98b2056f63@atl1s07mta2318.xt.local>",
+    "date": "Fri, 19 Dec 2025 09:14:01 -0600",
+    "from_addr": "\"FedEx\" <fedex@message.fedex.com>",
+    "subject": "Information on 2026 Rates for Your FedEx Account",
+    "body_preview": "FedEx\r\n \r\n \r\n \r\n \r\n \r\n \r\n \r\n\r\n \r\n https://click.message.fedex.com/?qs=4db05b19c4d870f06b21903fcc53c6538bb56bb95be81ddbe026c922de51efb50a3a4ec0f592f4a7",
+    "claude": {
+      "predicted_folder": "Personal",
+      "confidence": 0.6,
+      "reason": "Email appears to be from an individual person sending direct correspondence."
+    },
+    "ollama": {
+      "predicted_folder": "OnlineServices",
+      "secondary_labels": [
+        "Financial"
+      ],
+      "confidence": 0.8,
+      "raw_response": "{\"predicted_folder\": \"OnlineServices\", \"secondary_labels\": [\"Financial\"], \"confidence\": 0.8}\n\nThe email is from FedEx, a business, informing the recipient about 2026 rate changes for their account. The primary intent is to notify about a policy update related to their online account, which aligns wi"
+    },
+    "agreement": false
+  },
+  {
+    "index": 16,
+    "message_id": "<mfayid5vlhoobefc-iwu6fb1bl2h33o5k-1ae1f@probiouy.shop>",
+    "date": "Fri, 19 Dec 2025 06:04:16 -0800",
+    "from_addr": "\"TedsWoodworking\" <tedsWoodworking@probiouy.shop>",
+    "subject": "Grab 16,000 woodworking plans here (Open Now)",
+    "body_preview": "http://probiouy.shop/jzLxW0Ffkex9N7fGXAEtUhktbTz3p6ZFgfYyFjgvC8bOrg\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\nhttp://probiouy.shop/_j50K6",
+    "claude": {
+      "predicted_folder": "Personal",
+      "confidence": 0.6,
+      "reason": "Email appears to be from an individual person sending direct correspondence."
+    },
+    "ollama": {
+      "predicted_folder": "Promotions",
+      "secondary_labels": [
+        "Shopping"
+      ],
+      "confidence": 0.8,
+      "raw_response": "{\"predicted_folder\": \"Promotions\", \"secondary_labels\": [\"Shopping\"], \"confidence\": 0.8}\n\nThe email is a sales pitch promoting woodworking plans with urgency (\"Grab... Open Now\"), aligning with the Promotions folder's focus on incentives and offers. While the content involves product discovery, the p"
+    },
+    "agreement": false
+  },
+  {
+    "index": 17,
+    "message_id": "<156260639.42687710.1766130665783@lor1-app82457.prod.linkedin.com>",
+    "date": "Fri, 19 Dec 2025 07:51:05 +0000 (UTC)",
+    "from_addr": "LinkedIn <messages-noreply@linkedin.com>",
+    "subject": "Your turn, John 🏆",
+    "body_preview": "Millions of professionals are already testing their skills with LinkedIn’s daily puzzle games\r\n\r\nLinkedIn games offer quick, daily puzzles designed to",
+    "claude": {
+      "predicted_folder": "Career",
+      "confidence": 0.85,
+      "reason": "Email is about a job opportunity or recruiting outreach."
+    },
+    "ollama": {
+      "predicted_folder": "OnlineServices",
+      "secondary_labels": [
+        "Promotions"
+      ],
+      "confidence": 0.8,
+      "raw_response": "{\"predicted_folder\": \"OnlineServices\", \"secondary_labels\": [\"Promotions\"], \"confidence\": 0.8}\n\nThe email is from LinkedIn, a digital platform, promoting a new feature (the \"Zip\" game) as part of its service offerings. While it has promotional elements, its primary purpose is to notify users about a "
+    },
+    "agreement": false
+  },
+  {
+    "index": 18,
+    "message_id": "<1766101529069.80384882.181250883.46923724067@cp20.com>",
+    "date": "Thu, 18 Dec 2025 18:45:57 -0500",
+    "from_addr": "\"Global Cache'\" <newsletter@globalcache.com>",
+    "subject": "Global Cache' Holiday Hours 2025",
+    "body_preview": "https://www.globalcache.com (https://trk.cp20.com/click/dzv6-2zwu2r-n48em-lk1697n5/)\r\n\r\nThank You!\r\n\r\nAll of us at Global Caché are genuinely thankful",
+    "claude": {
+      "predicted_folder": "Promotions",
+      "confidence": 0.78,
+      "reason": "Email offers a discount or requests feedback/review."
+    },
+    "ollama": {
+      "predicted_folder": "Newsletters",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.8,
+      "raw_response": "{\"predicted_folder\": \"Newsletters\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.8}\n\nThe email is from a company (Global Cache) sending an informational update about holiday hours, which aligns with the \"Newsletters\" folder's purpose of delivering ongoing information. While it could loose"
+    },
+    "agreement": false
+  },
+  {
+    "index": 19,
+    "message_id": "<a4f71-59d-694487a4@e.abdulformichigan.com>",
+    "date": "Thu, 18 Dec 2025 23:00:59 +0000",
+    "from_addr": "\"Abdul El-Sayed\" <info@e.abdulformichigan.com>",
+    "subject": "Some people see my name as a political liability.",
+    "body_preview": "   \r\n      \r\n     \r\n    \r\n\r\n   \r\n\r\n   \r\n\r\n    ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌  ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌  ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌  ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌",
+    "claude": {
+      "predicted_folder": "LocalPolitics",
+      "confidence": 0.82,
+      "reason": "Email is from a political campaign or civic advocacy organization."
+    },
+    "ollama": {
+      "predicted_folder": "LocalPolitics",
+      "secondary_labels": [
+        "Personal"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"LocalPolitics\", \"secondary_labels\": [\"Personal\"], \"confidence\": 0.95}\n\nThe email is from an individual (Abdul El-Sayed) discussing political implications of his name, which aligns with the \"LocalPolitics\" folder's focus on political campaigns and civic advocacy. While the sende"
+    },
+    "agreement": true
+  },
+  {
+    "index": 20,
+    "message_id": "<wvuggl2mpxighk8n799t7hnqg79xxb8hq83x@convertkit-mail.com>",
+    "date": "Thu, 18 Dec 2025 14:01:06 +0000 (UTC)",
+    "from_addr": "Benjamin Brandt <benjamin@retirementstartstoday.com>",
+    "subject": "Every Day is Saturday: December 18th, 2025",
+    "body_preview": "Good morning, Retirement Starts Today Community! Welcome to Every\r\nDay is Saturday, the newsletter reminding us that in retirement,\r\nevery day is Satu",
+    "claude": {
+      "predicted_folder": "Newsletters",
+      "confidence": 0.75,
+      "reason": "Email is a subscribed newsletter delivering ongoing content."
+    },
+    "ollama": {
+      "predicted_folder": "Newsletters",
+      "secondary_labels": [
+        "Financial"
+      ],
+      "confidence": 0.8,
+      "raw_response": "{\"predicted_folder\": \"Newsletters\", \"secondary_labels\": [\"Financial\"], \"confidence\": 0.8}\n\n**Reasoning:**  \nThe email is a regular newsletter from a retirement planning service, promoting content about retirement strategies. The sender is an organization (retirementstartstoday.com), and the primary "
+    },
+    "agreement": true
+  },
+  {
+    "index": 21,
+    "message_id": "<4b1westv97-1@maplppagt01.bilh.itsystems.org>",
+    "date": "18 Dec 2025 12:53:38 -0500",
+    "from_addr": "MyBILHChart-DoNotReply@bilh.org",
+    "subject": "New message",
+    "body_preview": "Hello John, \r\n\r\nYou have a new message in MyBILH Chart. View the message: https://mychart.bilh.org/MyChart-BILH/Home/LogOut?postloginurl=/s/GRMMNGLIVP",
+    "claude": {
+      "predicted_folder": "Newsletters",
+      "confidence": 0.5,
+      "reason": "Email doesn't match specific categories; treated as general newsletter or update."
+    },
+    "ollama": {
+      "predicted_folder": "Healthcare",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.8,
+      "raw_response": "{\"predicted_folder\": \"Healthcare\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.8}\n\nThe email is from a healthcare organization's system (MyBILHChart) notifying the recipient of a new message in their patient portal. While it could be classified under OnlineServices due to its account-rel"
+    },
+    "agreement": false
+  },
+  {
+    "index": 22,
+    "message_id": "<5zsrJeYgpD1vHtCyf4bLrw@notifications.google.com>",
+    "date": "Thu, 18 Dec 2025 11:07:29 GMT",
+    "from_addr": "Google <no-reply@accounts.google.com>",
+    "subject": "Security alert for johnnyroller1725@gmail.com",
+    "body_preview": "This is a copy of a security alert sent to johnnyroller1725@gmail.com.\r\njohn@rkroll.com is the recovery email for this account. If you don't\r\nrecogniz",
+    "claude": {
+      "predicted_folder": "AccountSecurity",
+      "confidence": 0.93,
+      "reason": "Email contains a security code, login alert, or password reset request."
+    },
+    "ollama": {
+      "predicted_folder": "AccountSecurity",
+      "secondary_labels": [
+        "OnlineServices"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"AccountSecurity\", \"secondary_labels\": [\"OnlineServices\"], \"confidence\": 0.95}\n\nThe email is from Google's automated system, alerting the recipient about a security event (Thunderbird app access) and requiring action to secure their account. This directly matches the AccountSecu"
+    },
+    "agreement": true
+  },
+  {
+    "index": 23,
+    "message_id": "<1487204882.109857178.1766024770891@insideapple.apple.com>",
+    "date": "Thu, 18 Dec 2025 02:26:10 +0000 (GMT)",
+    "from_addr": "Apple Developer <developer@insideapple.apple.com>",
+    "subject": "Updated Apple Developer Program License Agreement Now Available",
+    "body_preview": "Hello,\r\n\r\nThe Apple Developer Program License Agreement has been revised to support new features, updated policies, and to provide clarification. Plea",
+    "claude": {
+      "predicted_folder": "Shopping",
+      "confidence": 0.78,
+      "reason": "Email is from a retailer showing products to consider buying."
+    },
+    "ollama": {
+      "predicted_folder": "OnlineServices",
+      "secondary_labels": [],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"OnlineServices\", \"secondary_labels\": [], \"confidence\": 0.95}\n\n**Reasoning:** The email is from Apple Developer (an organization) notifying the recipient about an updated license agreement, which requires action (reviewing and accepting terms). This aligns with the \"OnlineServic"
+    },
+    "agreement": false
+  },
+  {
+    "index": 24,
+    "message_id": "<FC.BB.51038.9DF13496@i-08fda6f87493dab4d.mta2vrest.sd.prd.sparkpost>",
+    "date": "Wed, 17 Dec 2025 21:25:45 +0000",
+    "from_addr": "\"Angie Craig\" <campaign@angiecraig.com>",
+    "subject": "It’s going to take a strong grassroots team to win.",
+    "body_preview": "https://secure.actblue.com/donate/loc_ac4mn_em_q42025?refcode=header [https://secure.actblue.com/donate/loc_ac4mn_em_q42025?refcode=header]           ",
+    "claude": {
+      "predicted_folder": "LocalPolitics",
+      "confidence": 0.82,
+      "reason": "Email is from a political campaign or civic advocacy organization."
+    },
+    "ollama": {
+      "predicted_folder": "LocalPolitics",
+      "secondary_labels": [
+        "Promotions"
+      ],
+      "confidence": 0.95,
+      "raw_response": "{\"predicted_folder\": \"LocalPolitics\", \"secondary_labels\": [\"Promotions\"], \"confidence\": 0.95}\n\nThe email is from a political campaign (Angie Craig's Senate bid) seeking grassroots support, which aligns with the LocalPolitics folder. While the donation link could loosely relate to Promotions, the pri"
+    },
+    "agreement": true
+  }
+]

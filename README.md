@@ -1,31 +1,29 @@
 # Mailmap
 
-Email classification daemon that monitors IMAP servers and automatically organizes emails into folders using a local LLM.
+Email classification daemon that monitors an IMAP server and automatically organizes emails into folders using a local LLM and an embedding-based classifier.
 
-## Overview
+## How It Works
 
-Mailmap connects to an IMAP server, monitors specified folders (typically INBOX) using IMAP IDLE, and classifies incoming emails using an Ollama-hosted LLM. Classified emails can optionally be moved to destination folders on the IMAP server.
+Mailmap connects to an IMAP server and classifies incoming emails in two stages:
 
-The system also supports bulk classification of existing emails from Thunderbird's local cache or directly from IMAP.
+1. **Embedding fast-path** — each email is embedded via `nomic-embed-text` (768-dim float32). The embedding is compared to per-folder centroids (mean of all known embeddings for that folder). If the top match is clear enough, classification is instant.
+
+2. **LLM fallback** — when the centroid match is ambiguous or a folder has too few examples, the email is sent to `qwen3:14b` via Ollama with a reasoning prompt that references your `categories.txt` descriptions.
+
+As you accumulate examples and use `mailmap sync` to pick up manual corrections, the centroid classifier improves and the LLM is needed less often.
 
 ## Requirements
 
-- Python 3.12+
-- Ollama with a language model (default: `qwen2.5:7b`)
+- Python 3.11+
+- Ollama on a GPU host with `qwen3:14b` and `nomic-embed-text` pulled
 - IMAP server with IDLE support
 
 ## Installation
 
 ```bash
-# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
-
-# Install with development dependencies
 pip install -e ".[dev]"
-
-# Copy and configure
-cp config.example.toml config.toml
 ```
 
 ## Configuration
@@ -34,24 +32,31 @@ cp config.example.toml config.toml
 
 | Variable | Description |
 |----------|-------------|
-| `MAILMAP_IMAP_USERNAME` | IMAP username (required for daemon) |
-| `MAILMAP_IMAP_PASSWORD` | IMAP password (required, not stored in config) |
-| `MAILMAP_WS_TOKEN` | WebSocket authentication token (optional) |
+| `MAILMAP_IMAP_USERNAME` | IMAP login (required) |
+| `MAILMAP_IMAP_PASSWORD` | IMAP password — never stored in config |
+| `MAILMAP_WS_TOKEN` | WebSocket auth token (optional, Thunderbird extension only) |
 
-### Config File (config.toml)
+### config.toml
 
 ```toml
 [imap]
 host = "imap.example.com"
 port = 993
 use_ssl = true
-idle_folders = ["INBOX"]
+idle_folders = ["INBOX"]        # Folders monitored with IMAP IDLE
 poll_interval_seconds = 300
 
 [ollama]
-base_url = "http://localhost:11434"
-model = "qwen2.5:7b"
-timeout_seconds = 120
+base_url = "http://192.168.1.169:11434"   # GPU host
+model = "qwen3:14b"
+embed_model = "nomic-embed-text"
+timeout_seconds = 300
+
+[embedding]
+enabled = true
+min_similarity = 0.55   # Cosine similarity floor for fast-path
+min_margin = 0.05       # top1 - top2 must exceed this
+min_examples = 5        # Folders with fewer embeddings skip fast-path
 
 [database]
 path = "mailmap.db"
@@ -59,294 +64,269 @@ categories_file = "categories.txt"
 
 [spam]
 enabled = true
-skip_folders = ["Junk", "Spam", "Trash"]
+skip_folders = ["Junk", "Spam", "Trash", "Deleted Items", "Deleted"]
+# rules: list of DSL rules — omit to use 40+ built-in defaults
 ```
 
-### Categories File (categories.txt)
+### categories.txt
 
-Categories define the destination folders and their descriptions for classification. The LLM uses these descriptions to decide where each email belongs.
+Defines destination folders and the descriptions the LLM uses to classify emails.
 
-**Format:**
 ```
-CategoryName: Description text that can span
-multiple lines until a blank line.
+# CategoryName: Description (no spaces in name, can span lines)
 
-AnotherCategory: Another description.
+Personal: A real person writing to you personally. The sender is an
+individual using their own email address.
 
-# Comments start with #
-```
+Financial: From a financial institution about your money. The sender's
+primary business is managing financial assets — banks, brokerages, etc.
 
-**Rules:**
-- Category names: no spaces, alphanumeric + underscore
-- Descriptions can span multiple lines (until blank line)
-- Lines starting with `#` are comments
-- Blank lines separate categories
-
-**Writing Effective Descriptions:**
-
-Use a **discriminative approach** - focus on what makes each category unique rather than listing everything it contains. Describe:
-- WHO sends these emails (type of sender)
-- WHAT the primary intent is
-- What explicitly does NOT belong (to avoid confusion)
-
-**Example:**
-```
-Financial: Communications FROM financial institutions (banks, brokerages,
-credit unions) ABOUT your accounts, statements, or investments. The sender
-must be a company whose primary business is managing money. NOT payment
-receipts from regular companies - those go to Receipts.
-
-Receipts: Payment confirmations and invoices FROM any company (except
-financial institutions) AFTER a transaction. The primary intent is "we
-received your payment" or "here's your bill." NOT order status updates.
-
-Orders: Order confirmations and shipping notifications. Status updates
-about items you've purchased - placed, shipped, delivered, delayed.
-
-AccountSecurity: Security-critical messages requiring immediate action.
-Password resets, 2FA codes, login alerts, suspicious activity warnings.
-
-Personal: Personal correspondence from friends and family.
+AccountSecurity: A security action is required or has occurred. Two-factor
+codes, login alerts, password resets.
 ```
 
-**Commands:**
+Write descriptions that define the **essence** of a category — what makes it uniquely itself — rather than listing specific senders or explicit exclusions.
+
 ```bash
-mailmap categories          # List current categories
-mailmap learn               # Generate categories from existing Thunderbird folders
-mailmap init --limit 500    # Analyze emails and suggest folder structure
+mailmap categories         # List current categories
+mailmap learn              # Generate categories from existing Thunderbird folders
+mailmap init --limit 500   # Analyze emails and suggest folder structure
+```
+
+## First-Time Setup
+
+### 1. Pull models on the GPU host
+
+```bash
+ollama pull qwen3:14b
+ollama pull nomic-embed-text
+```
+
+### 2. Seed embeddings from existing folders
+
+This scans every non-system IMAP folder, imports emails into the database with `classification = folder_name`, computes embeddings, and builds centroids — all before classifying anything new.
+
+```bash
+export MAILMAP_IMAP_USERNAME=you@example.com
+export MAILMAP_IMAP_PASSWORD=yourpassword
+
+mailmap embed --seed-from-imap
+```
+
+### 3. Classify INBOX
+
+```bash
+mailmap classify --source-type imap
+```
+
+### 4. Review results
+
+```bash
+mailmap summary
+mailmap list --limit 100
+```
+
+### 5. Transfer (copy to category folders)
+
+```bash
+mailmap transfer --rate-limit 1.0
+```
+
+### 6. Start the daemon for ongoing classification
+
+```bash
+mailmap daemon --move
 ```
 
 ## CLI Commands
 
-### Daemon Mode
+### Daemon
 
 ```bash
-# Monitor IMAP and classify new emails
-mailmap daemon
-
-# Classify and move emails to destination folders
-mailmap daemon --move
-
-# Process existing unclassified emails on startup
-mailmap daemon --move --process-existing
+mailmap daemon                      # Monitor INBOX, classify new emails
+mailmap daemon --move               # Also move classified emails to folders
+mailmap daemon --process-existing   # Classify existing unclassified emails first
 ```
 
 ### Bulk Classification
 
 ```bash
-# Classify emails from Thunderbird cache
-mailmap classify --limit 1000
-
-# Classify specific folder
-mailmap classify --folder INBOX --limit 50
-
-# Classify from IMAP directly
-mailmap classify --source-type imap --limit 100
-
-# Classify and move via Thunderbird extension
-mailmap classify --folder INBOX --move --target-account outlook.office365.com
+mailmap classify                    # From Thunderbird cache (default)
+mailmap classify --source-type imap # Directly from IMAP
+mailmap classify --folder INBOX --limit 200
+mailmap classify --force            # Re-classify already-processed emails
+mailmap classify --concurrency 4    # Parallel LLM calls
+mailmap classify --copy             # Copy to folders after classifying
+mailmap classify --move             # Move to folders after classifying
+mailmap classify --rate-limit 2.0   # Seconds between transfer ops
 ```
 
-### Category Management
+### Embeddings and Centroids
 
 ```bash
-# Learn categories from existing Thunderbird folders
-mailmap learn
+mailmap embed                       # Embed any classified emails missing embeddings
+mailmap embed --seed-from-imap      # Import all IMAP folders into DB, then embed
+mailmap embed --rebuild             # Wipe all embeddings/centroids and recompute
+```
 
-# Analyze emails and suggest folder structure
-mailmap init --limit 500
+### Sync and Transfer
 
-# List categories from categories.txt
-mailmap categories
+```bash
+# Sync: marks transferred emails, detects manual moves, recomputes centroids
+mailmap sync
+mailmap sync --dry-run
+
+# Transfer: move/copy pre-classified emails to IMAP folders
+mailmap transfer
+mailmap transfer --move
+mailmap transfer --rate-limit 2.0
 ```
 
 ### Results and Maintenance
 
 ```bash
-# List classification results
-mailmap list
-mailmap list --limit 100
+mailmap summary                     # Counts per category
+mailmap list                        # Recent classifications
+mailmap list --limit 200
 
-# Show summary with counts per category
-mailmap summary
+mailmap clear                       # Clear all classifications (keeps emails)
+mailmap clear --folder INBOX        # Clear only this folder's classifications
+mailmap reset                       # Delete database entirely
+mailmap dedup                       # Remove duplicate emails from category folders
+mailmap dedup --dry-run
+mailmap cleanup                     # Delete classification folders from IMAP
+```
 
-# Upload classified emails to IMAP folders
-mailmap upload
-mailmap upload --dry-run
+### Category Management
 
-# Clear classifications (keeps emails)
-mailmap clear
-
-# Reset database
-mailmap reset
+```bash
+mailmap categories                  # List categories from categories.txt
+mailmap learn                       # Generate descriptions from Thunderbird folders
+mailmap init --limit 500            # Suggest folder structure from email samples
 ```
 
 ### IMAP Operations
 
 ```bash
-# List folders with email counts
-mailmap folders
-
-# List emails in a folder
+mailmap folders                     # List all folders with counts
+mailmap emails INBOX                # List emails in a folder
 mailmap emails INBOX --limit 100
+mailmap read INBOX 123              # Display email by UID
 
-# Read email by UID
-mailmap read INBOX 123
-
-# Folder management (default: direct IMAP)
 mailmap create-folder MyFolder
 mailmap delete-folder MyFolder
-
-# Folder management via Thunderbird extension
-mailmap create-folder MyFolder --target-account local --websocket
-mailmap delete-folder MyFolder --target-account imap --websocket
-
-# Move/copy emails
 mailmap move INBOX 123 Archive
 mailmap copy INBOX 123 Archive
-
-# Cleanup classification folders from target
-mailmap cleanup --target-account imap
-mailmap cleanup --target-account local --websocket
 ```
 
-## Common Options
+### Common Flags
 
-All commands support:
+All commands accept:
 
 ```bash
--c, --config PATH      # Config file (default: config.toml)
---db-path PATH         # Override database path
---ollama-url URL       # Override Ollama base URL
---ollama-model MODEL   # Override Ollama model name
+-c, --config PATH       Config file (default: config.toml)
+-v, --verbose           Debug logging
+--db-path PATH          Override database path
+--ollama-url URL        Override Ollama base URL
+--ollama-model MODEL    Override model name
 ```
 
-Thunderbird commands (learn/classify/init) also support:
+Source commands (classify, learn, init) also accept:
 
 ```bash
---profile PATH         # Thunderbird profile path
---folder SPEC          # Process specific folder (e.g., INBOX or server:INBOX)
---limit N              # Max emails (integer or fraction like 0.1 for 10%)
---random               # Random sampling instead of sequential
---source-type TYPE     # 'thunderbird' (default) or 'imap'
-```
-
-Target commands (classify, cleanup, create-folder, delete-folder) support:
-
-```bash
---target-account ACCT  # 'local' (Thunderbird), 'imap' (direct), or account ID
---websocket [PORT]     # Use WebSocket (default port: 9753)
-```
-
-## Typical Workflow
-
-```bash
-# 1. Learn categories from existing Thunderbird folders
-mailmap learn
-
-# 2. Edit categories.txt as needed
-
-# 3. Bulk classify existing emails
-mailmap classify --limit 500
-
-# 4. Review results
-mailmap summary
-
-# 5. Upload to IMAP or run daemon for ongoing classification
-mailmap upload
-# or
-mailmap daemon --move
+--profile PATH          Thunderbird profile path
+--folder SPEC           Process specific folder (e.g. INBOX or server.com:INBOX)
+--source-type TYPE      'thunderbird' (default) or 'imap'
+--limit N               Max emails: int for count, 0.1 for 10%
+--random                Random sampling
 ```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                          CLI (cli.py)                           │
-├─────────────────────────────────────────────────────────────────┤
-│  daemon  │  classify  │  learn  │  upload  │  imap_ops  │ utils │
-├──────────┴────────────┴─────────┴──────────┴────────────┴───────┤
-│                                                                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   Sources   │  │   Targets   │  │      Core Services      │  │
-│  │             │  │             │  │                         │  │
-│  │ Thunderbird │  │  WebSocket  │  │  LLM (Ollama client)    │  │
-│  │    IMAP     │  │    IMAP     │  │  Database (SQLite)      │  │
-│  └─────────────┘  └─────────────┘  │  Categories (txt file)  │  │
-│                                    │  Content (email parser) │  │
-│                                    │  Spam (header rules)    │  │
-│                                    └─────────────────────────┘  │
-│                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                    IMAP Client                          │    │
-│  │  ImapMailbox (sync ops)  │  ImapListener (IDLE/poll)   │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                         CLI (cli.py)                             │
+├──────────────────────────────────────────────────────────────────┤
+│  daemon │ classify │ embed │ sync │ transfer │ imap_ops │ utils  │
+├─────────────────────────────────────────────────────────────────-┤
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │              HybridClassifier (classifier.py)            │    │
+│  │  Embedding fast-path  →  cosine(email, centroid)         │    │
+│  │  LLM fallback         →  OllamaClient.classify_email()   │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│                                                                  │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌───────────────┐   │
+│  │    Sources      │  │     Targets      │  │  Core         │   │
+│  │  Thunderbird    │  │  ImapTarget      │  │  LLM client   │   │
+│  │  ImapSource     │  │  WebSocketTarget │  │  EmbedClient  │   │
+│  └─────────────────┘  └──────────────────┘  │  Database     │   │
+│                                             │  Categories   │   │
+│  ┌────────────────────────────────────────┐  │  Spam rules   │   │
+│  │         ImapClient / ImapListener      │  │  Content      │   │
+│  │  IDLE monitoring · batch header fetch  │  └───────────────┘   │
+│  └────────────────────────────────────────┘                      │
+└──────────────────────────────────────────────────────────────────┘
 ```
-
-### Components
-
-**CLI Layer** (`cli.py`, `commands/`)
-- Argument parsing and command dispatch
-- Commands: daemon, classify, learn, init, upload, imap_ops, utils
-
-**Email Sources** (`sources/`)
-- `ThunderbirdSource`: Reads from local Thunderbird mbox cache
-- `ImapSource`: Reads directly from IMAP server
-
-**Email Targets** (`targets/`)
-- `ImapTarget`: Direct IMAP server operations
-- `WebSocketTarget`: Via Thunderbird extension (self-contained, manages its own server)
-- Both implement `EmailTarget` protocol with `create_folder`, `delete_folder`, `list_folders`, `copy_email`, `move_email`
-
-**Core Services**
-- `llm.py`: Ollama REST API client for classification
-- `database.py`: SQLite storage for emails and classifications
-- `categories.py`: Load/save category definitions
-- `content.py`: Email body extraction and cleaning
-- `spam.py`: Header-based spam detection
-
-**IMAP Client** (`imap_client.py`)
-- `ImapMailbox`: Connection management, folder operations, email fetch/move
-- `ImapListener`: Async IDLE monitoring with fallback polling
-
-**Prompt Templates** (`prompts/`)
-- Editable text files for LLM prompts
-- `classify_email.txt`, `generate_folder_description.txt`, etc.
 
 ## Database Schema
 
-Single table storing emails and their classifications:
-
 ```sql
 emails (
-    message_id TEXT PRIMARY KEY,
-    folder_id TEXT,
-    subject TEXT,
-    from_addr TEXT,
-    mbox_path TEXT,
-    classification TEXT,
-    confidence REAL,
-    is_spam INTEGER,
-    spam_reason TEXT,
-    processed_at TIMESTAMP
-)
+    message_id    TEXT PRIMARY KEY,
+    folder_id     TEXT NOT NULL,   -- original IMAP folder
+    subject       TEXT,
+    from_addr     TEXT,
+    mbox_path     TEXT,            -- mbox path or empty for IMAP-sourced
+    classification TEXT,           -- predicted destination folder
+    confidence    REAL,
+    is_spam       INTEGER DEFAULT 0,
+    spam_reason   TEXT,            -- which rule matched
+    processed_at  TIMESTAMP,
+    transferred_at TIMESTAMP,      -- when copied/moved to target folder
+    embedding     BLOB             -- float32 vector (nomic-embed-text, 768-dim)
+);
+
+folder_centroids (
+    folder        TEXT PRIMARY KEY, -- classification name
+    centroid      BLOB NOT NULL,    -- mean of all embeddings for this folder
+    sample_count  INTEGER NOT NULL,
+    updated_at    TIMESTAMP NOT NULL
+);
+```
+
+Schema migrations run automatically on startup — existing databases gain new columns without data loss.
+
+## Spam Detection
+
+Mailmap includes 40+ header-based spam rules covering Microsoft/Office 365, SpamAssassin, Rspamd, Barracuda, Proofpoint, Cisco IronPort, and others. Spam emails are marked in the database and skipped for LLM classification. Configure in `[spam]`:
+
+```toml
+[spam]
+enabled = true
+skip_folders = ["Junk", "Spam", "Trash"]
+rules = [
+    "X-Spam-Score >= 5.0",
+    "X-Spam-Flag == YES",
+    "X-MS-Exchange-Organization-SCL >= 5",
+]
+```
+
+Rule DSL: `HEADER [/REGEX/] OPERATOR VALUE`
+
+Operators: `>=`, `>`, `<=`, `<`, `==`, `!=`, `prefix`, `suffix`, `contains`, `in`, `exists`
+
+## Deployment
+
+```bash
+../deploy.sh/deploy.sh update .   # Deploy code changes to server
+../deploy.sh/deploy.sh init .     # Full initial deployment with infrastructure
 ```
 
 ## Testing
 
 ```bash
-pytest              # Run all tests
-pytest -v           # Verbose output
-pytest tests/test_database.py  # Specific file
-```
-
-## Deployment
-
-For systemd deployment, see `deploy.conf` which configures the binary_service module from deploy.sh.
-
-```bash
-# Deploy to remote host
-../deploy.sh/deploy.sh init .   # First time
-../deploy.sh/deploy.sh update . # Updates
+pytest                          # All tests
+pytest tests/test_embedding.py  # Embedding + classifier tests
+pytest -v                       # Verbose
 ```

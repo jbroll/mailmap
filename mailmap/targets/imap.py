@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from mailmap.config import ImapConfig
-from mailmap.imap_client import ImapMailbox
+from mailmap.imap_client import ImapClient
 
 logger = logging.getLogger("mailmap.targets.imap")
 
@@ -28,13 +28,8 @@ class ImapTarget:
     MAX_RETRIES = 3
 
     def __init__(self, config: ImapConfig):
-        """Initialize IMAP target.
-
-        Args:
-            config: IMAP connection configuration
-        """
         self._config = config
-        self._mailbox: ImapMailbox | None = None
+        self._client: ImapClient | None = None
         self._ensured_folders: set[str] = set()  # Cache of folders we've ensured exist
         self._reconnect_attempt = 0
 
@@ -43,45 +38,32 @@ class ImapTarget:
         return "imap"
 
     def _calculate_backoff(self, attempt: int) -> float:
-        """Calculate exponential backoff delay."""
         delay = self.INITIAL_RETRY_DELAY * (self.BACKOFF_MULTIPLIER ** attempt)
         return min(delay, self.MAX_RETRY_DELAY)
 
     async def connect(self) -> None:
-        """Connect to the IMAP server."""
         loop = asyncio.get_event_loop()
-        self._mailbox = ImapMailbox(self._config)
-        await loop.run_in_executor(None, self._mailbox.connect)
-        self._reconnect_attempt = 0  # Reset on successful connect
+        self._client = ImapClient(self._config)
+        await loop.run_in_executor(None, self._client.connect)
+        self._reconnect_attempt = 0
         logger.info(f"IMAP target connected to {self._config.host}")
 
     async def disconnect(self) -> None:
-        """Disconnect from the IMAP server."""
-        if self._mailbox:
+        if self._client:
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._mailbox.disconnect)
-            self._mailbox = None
+            await loop.run_in_executor(None, self._client.disconnect)
+            self._client = None
 
     async def _reconnect(self) -> bool:
-        """Attempt to reconnect to the IMAP server.
-
-        Returns:
-            True if reconnection succeeded, False otherwise
-        """
         logger.info("Attempting IMAP reconnection...")
-
-        # Disconnect existing connection if any
-        if self._mailbox:
+        if self._client:
             try:
                 loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, self._mailbox.disconnect)
+                await loop.run_in_executor(None, self._client.disconnect)
             except Exception:
                 pass
-            self._mailbox = None
-
-        # Clear folder cache since connection state is lost
+            self._client = None
         self._ensured_folders.clear()
-
         try:
             await self.connect()
             logger.info("IMAP reconnection successful")
@@ -91,88 +73,36 @@ class ImapTarget:
             return False
 
     def _is_connection_error(self, error: Exception) -> bool:
-        """Check if an exception indicates a connection problem.
-
-        Args:
-            error: The exception to check
-
-        Returns:
-            True if the error suggests connection issues that might be fixed by reconnecting
-        """
         error_str = str(error).lower()
-
-        # Known connection-related error patterns
         connection_patterns = [
-            "connection",
-            "socket",
-            "eof",
-            "broken pipe",
-            "reset by peer",
-            "timed out",
-            "bad command",
-            "unknown command",  # The error pattern the user saw
-            "not connected",
+            "connection", "socket", "eof", "broken pipe", "reset by peer",
+            "timed out", "bad command", "unknown command", "not connected",
             "server unavailable",
         ]
-
         return any(pattern in error_str for pattern in connection_patterns)
 
     async def create_folder(self, folder: str) -> bool:
-        """Create a folder on the IMAP server.
-
-        Args:
-            folder: Folder name to create
-
-        Returns:
-            True if created, False if already exists
-        """
-        if self._mailbox is None:
+        if self._client is None:
             raise RuntimeError("Target not connected")
-
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            self._mailbox.create_folder,
-            folder,
-        )
+        return await loop.run_in_executor(None, self._client.create_folder, folder)
 
     async def delete_folder(self, folder: str) -> bool:
-        """Delete a folder from the IMAP server.
-
-        Note: Most IMAP servers require the folder to be empty first.
-
-        Args:
-            folder: Folder name to delete
-
-        Returns:
-            True if deleted, False otherwise
-        """
-        if self._mailbox is None:
+        if self._client is None:
             raise RuntimeError("Target not connected")
-
         loop = asyncio.get_event_loop()
         try:
-            await loop.run_in_executor(
-                None,
-                self._mailbox.client.delete_folder,
-                folder,
-            )
+            await loop.run_in_executor(None, self._client.delete_folder, folder)
             return True
         except Exception as e:
             logger.error(f"Failed to delete folder {folder}: {e}")
             return False
 
     async def list_folders(self) -> list[str]:
-        """List all folders on the IMAP server.
-
-        Returns:
-            List of folder names
-        """
-        if self._mailbox is None:
+        if self._client is None:
             raise RuntimeError("Target not connected")
-
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._mailbox.list_folders)
+        return await loop.run_in_executor(None, self._client.list_folders)
 
     async def copy_email(
         self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
@@ -181,16 +111,6 @@ class ImapTarget:
 
         If raw_bytes is provided, uploads directly (for cross-server transfers).
         Otherwise searches for the email by Message-ID on this server.
-
-        Includes automatic reconnection on connection errors.
-
-        Args:
-            message_id: Message-ID header of the email
-            target_folder: Destination folder
-            raw_bytes: Optional raw email content for cross-server uploads
-
-        Returns:
-            True if successful
         """
         for attempt in range(self.MAX_RETRIES + 1):
             try:
@@ -216,24 +136,16 @@ class ImapTarget:
     async def _copy_email_impl(
         self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
     ) -> bool:
-        """Internal implementation of copy_email without retry logic."""
-        if self._mailbox is None:
+        if self._client is None:
             raise RuntimeError("Target not connected")
 
         loop = asyncio.get_event_loop()
 
-        # Ensure target folder exists (cached to avoid redundant calls)
         if target_folder not in self._ensured_folders:
-            await loop.run_in_executor(
-                None,
-                self._mailbox.ensure_folder,
-                target_folder,
-            )
+            await loop.run_in_executor(None, self._client.ensure_folder, target_folder)
             self._ensured_folders.add(target_folder)
 
-        # Use provided raw bytes or search for email on server
         raw_email = raw_bytes
-        source_folder = None
         if raw_email is None:
             location = await self._find_email(message_id)
             if not location:
@@ -241,23 +153,18 @@ class ImapTarget:
                 return False
             source_folder, uid = location
 
-            # Skip if email is already in target folder
             if source_folder == target_folder:
                 logger.debug(f"Email already in {target_folder}: {message_id}")
                 return True
 
-            raw_email = await self._fetch_email_by_uid(source_folder, uid)
+            raw_email = await loop.run_in_executor(
+                None, self._client.fetch_raw, uid, source_folder
+            )
             if not raw_email:
                 logger.warning(f"Failed to fetch email: {message_id}")
                 return False
 
-        # Append to target folder
-        await loop.run_in_executor(
-            None,
-            self._mailbox.append_email,
-            target_folder,
-            raw_email,
-        )
+        await loop.run_in_executor(None, self._client.append_email, target_folder, raw_email)
         return True
 
     async def move_email(
@@ -266,18 +173,7 @@ class ImapTarget:
         """Move an email to a target folder.
 
         If raw_bytes is provided, uploads directly (for cross-server transfers).
-        Note: cross-server "move" only uploads; source deletion must be handled separately.
         Otherwise searches for the email by Message-ID and uses IMAP MOVE.
-
-        Includes automatic reconnection on connection errors.
-
-        Args:
-            message_id: Message-ID header of the email
-            target_folder: Destination folder
-            raw_bytes: Optional raw email content for cross-server uploads
-
-        Returns:
-            True if successful
         """
         for attempt in range(self.MAX_RETRIES + 1):
             try:
@@ -303,82 +199,48 @@ class ImapTarget:
     async def _move_email_impl(
         self, message_id: str, target_folder: str, raw_bytes: bytes | None = None
     ) -> bool:
-        """Internal implementation of move_email without retry logic."""
-        if self._mailbox is None:
+        if self._client is None:
             raise RuntimeError("Target not connected")
 
         loop = asyncio.get_event_loop()
 
-        # Ensure target folder exists (cached to avoid redundant calls)
         if target_folder not in self._ensured_folders:
-            await loop.run_in_executor(
-                None,
-                self._mailbox.ensure_folder,
-                target_folder,
-            )
+            await loop.run_in_executor(None, self._client.ensure_folder, target_folder)
             self._ensured_folders.add(target_folder)
 
-        # If raw bytes provided, upload directly (cross-server transfer)
         if raw_bytes is not None:
-            await loop.run_in_executor(
-                None,
-                self._mailbox.append_email,
-                target_folder,
-                raw_bytes,
-            )
+            await loop.run_in_executor(None, self._client.append_email, target_folder, raw_bytes)
             return True
 
-        # Find the email on this server
         location = await self._find_email(message_id)
         if not location:
             logger.warning(f"Email not found: {message_id}")
             return False
 
         source_folder, uid = location
-
-        # Use IMAP MOVE command
         await loop.run_in_executor(
-            None,
-            self._mailbox.move_email,
-            uid,
-            source_folder,
-            target_folder,
+            None, self._client.move_email, uid, source_folder, target_folder
         )
         return True
 
     async def _find_email(self, message_id: str) -> tuple[str, int] | None:
-        """Find an email by Message-ID across all folders.
-
-        Args:
-            message_id: Message-ID header to search for
-
-        Returns:
-            Tuple of (folder, uid) if found, None otherwise
-        """
-        if self._mailbox is None:
+        """Find an email by Message-ID across all folders."""
+        if self._client is None:
             return None
 
         loop = asyncio.get_event_loop()
-        mailbox = self._mailbox  # Capture for lambda
+        client = self._client
 
-        # Get all folders
-        folders = await loop.run_in_executor(None, mailbox.list_folders)
+        folders = await loop.run_in_executor(None, client.list_folders)
 
-        # Search each folder
         for folder in folders:
             try:
-                await loop.run_in_executor(
-                    None,
-                    mailbox.select_folder,
-                    folder,
-                )
-
-                # Search by Message-ID header
                 uids = await loop.run_in_executor(
                     None,
-                    lambda: mailbox.client.search(["HEADER", "Message-ID", message_id]),
+                    client.search,
+                    folder,
+                    ["HEADER", "Message-ID", message_id],
                 )
-
                 if uids:
                     return (folder, uids[0])
             except Exception as e:
@@ -386,55 +248,6 @@ class ImapTarget:
                 continue
 
         return None
-
-    async def _fetch_email_by_uid(self, folder: str, uid: int) -> bytes | None:
-        """Fetch raw email by folder and UID.
-
-        Args:
-            folder: Folder containing the email
-            uid: UID of the email
-
-        Returns:
-            Raw email bytes if found, None otherwise
-        """
-        if self._mailbox is None:
-            return None
-
-        loop = asyncio.get_event_loop()
-        mailbox = self._mailbox  # Capture for lambda
-
-        await loop.run_in_executor(
-            None,
-            mailbox.select_folder,
-            folder,
-        )
-
-        messages = await loop.run_in_executor(
-            None,
-            # Use BODY.PEEK[] to avoid marking as read
-            lambda: mailbox.client.fetch([uid], ["BODY.PEEK[]"]),
-        )
-
-        if uid in messages:
-            return messages[uid][b"BODY[]"]
-
-        return None
-
-    async def _find_and_fetch_email(self, message_id: str) -> bytes | None:
-        """Find and fetch raw email by Message-ID.
-
-        Args:
-            message_id: Message-ID header to search for
-
-        Returns:
-            Raw email bytes if found, None otherwise
-        """
-        location = await self._find_email(message_id)
-        if not location:
-            return None
-
-        folder, uid = location
-        return await self._fetch_email_by_uid(folder, uid)
 
     async def __aenter__(self) -> "ImapTarget":
         await self.connect()

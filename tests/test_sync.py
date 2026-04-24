@@ -93,7 +93,7 @@ class TestSyncTransfers:
             "Personal": ["<msg2@example.com>"],
         }.get(folder, [])
 
-        with patch("mailmap.imap_client.ImapMailbox", return_value=mock_mailbox):
+        with patch("mailmap.imap_client.ImapClient", return_value=mock_mailbox):
             sync_transfers(mock_config, db_with_emails, dry_run=False)
 
         db_with_emails.connect()
@@ -113,7 +113,7 @@ class TestSyncTransfers:
         mock_mailbox.list_folders.return_value = ["Work", "Personal"]
         mock_mailbox.fetch_all_message_ids.return_value = ["<msg1@example.com>"]
 
-        with patch("mailmap.imap_client.ImapMailbox", return_value=mock_mailbox):
+        with patch("mailmap.imap_client.ImapClient", return_value=mock_mailbox):
             sync_transfers(mock_config, db_with_emails, dry_run=True)
 
         db_with_emails.connect()
@@ -130,7 +130,7 @@ class TestSyncTransfers:
         mock_mailbox.list_folders.return_value = ["Work", "INBOX"]
         mock_mailbox.fetch_all_message_ids.return_value = ["<msg1@example.com>"]
 
-        with patch("mailmap.imap_client.ImapMailbox", return_value=mock_mailbox):
+        with patch("mailmap.imap_client.ImapClient", return_value=mock_mailbox):
             sync_transfers(mock_config, db_with_emails, dry_run=False)
 
         db_with_emails.connect()
@@ -146,7 +146,7 @@ class TestSyncTransfers:
         mock_mailbox.list_folders.return_value = ["Work", "Personal"]
         mock_mailbox.fetch_all_message_ids.return_value = []
 
-        with patch("mailmap.imap_client.ImapMailbox", return_value=mock_mailbox):
+        with patch("mailmap.imap_client.ImapClient", return_value=mock_mailbox):
             sync_transfers(mock_config, db_with_emails, dry_run=False)
 
         db_with_emails.connect()
@@ -164,7 +164,7 @@ class TestSyncTransfers:
             ["<msg2@example.com>"],  # Personal succeeds
         ]
 
-        with patch("mailmap.imap_client.ImapMailbox", return_value=mock_mailbox):
+        with patch("mailmap.imap_client.ImapClient", return_value=mock_mailbox):
             sync_transfers(mock_config, db_with_emails, dry_run=False)
 
         db_with_emails.connect()
@@ -195,6 +195,6 @@ class TestSyncTransfers:
         db = Database(str(tmp_path / "test.db"))
 
         # Should return early without connecting to IMAP
-        with patch("mailmap.imap_client.ImapMailbox") as mock_imap:
+        with patch("mailmap.imap_client.ImapClient") as mock_imap:
             sync_transfers(config, db, dry_run=False)
             mock_imap.assert_not_called()

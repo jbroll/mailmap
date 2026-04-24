@@ -14,7 +14,7 @@ import pytest
 from imapclient.exceptions import LoginError
 
 from mailmap.config import ImapConfig
-from mailmap.imap_client import ImapMailbox
+from mailmap.imap_client import ImapClient
 
 # Skip all tests if credentials not set
 pytestmark = pytest.mark.skipif(
@@ -41,7 +41,7 @@ def imap_config():
 @pytest.fixture
 def imap_client(imap_config):
     """Create connected IMAP client."""
-    client = ImapMailbox(imap_config)
+    client = ImapClient(imap_config)
     client.connect()
     yield client
     client.disconnect()
@@ -50,7 +50,7 @@ def imap_client(imap_config):
 class TestImapConnection:
     def test_connect_disconnect(self, imap_config):
         """Test basic connection and disconnection."""
-        client = ImapMailbox(imap_config)
+        client = ImapClient(imap_config)
         client.connect()
         assert client._client is not None
         client.disconnect()
@@ -68,7 +68,7 @@ class TestImapConnection:
             username="invalid@example.com",
             password="wrongpassword",
         )
-        client = ImapMailbox(config)
+        client = ImapClient(config)
         with pytest.raises(LoginError):
             client.connect()
 
@@ -94,27 +94,27 @@ class TestImapFolders:
 
 
 class TestImapEmails:
-    def test_fetch_recent_uids(self, imap_client):
+    def test_fetch_uids(self, imap_client):
         """Test fetching recent UIDs."""
-        uids = imap_client.fetch_recent_uids("INBOX", limit=10)
+        uids = imap_client.fetch_uids("INBOX", limit=10)
         assert isinstance(uids, list)
         # May be empty if INBOX is empty
 
     def test_fetch_email(self, imap_client):
         """Test fetching a single email."""
-        uids = imap_client.fetch_recent_uids("INBOX", limit=1)
+        uids = imap_client.fetch_uids("INBOX", limit=1)
         if uids:
             email = imap_client.fetch_email(uids[0], "INBOX")
             assert email is not None
-            assert email.message_id
-            assert email.folder == "INBOX"
-            assert email.uid == uids[0]
+            assert email["message_id"]
+            assert email["folder"] == "INBOX"
+            assert email["uid"] == uids[0]
         else:
             pytest.skip("No emails in INBOX to test")
 
     def test_get_new_uids_since(self, imap_client):
         """Test getting UIDs since a given UID."""
-        uids = imap_client.fetch_recent_uids("INBOX", limit=5)
+        uids = imap_client.fetch_uids("INBOX", limit=5)
         if len(uids) >= 2:
             # Get UIDs after the first one
             new_uids = imap_client.get_new_uids_since("INBOX", uids[0])

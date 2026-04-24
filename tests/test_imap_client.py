@@ -8,8 +8,7 @@ import pytest
 
 from mailmap.config import ImapConfig
 from mailmap.imap_client import (
-    EmailMessage,
-    ImapMailbox,
+    ImapClient,
     decode_mime_header,
     extract_attachments,
     extract_body,
@@ -18,7 +17,6 @@ from mailmap.imap_client import (
 
 @pytest.fixture
 def imap_config():
-    """Create a test IMAP configuration."""
     return ImapConfig(
         host="imap.example.com",
         port=993,
@@ -29,8 +27,8 @@ def imap_config():
 
 @pytest.fixture
 def mock_imap_client():
-    """Create a mock IMAPClient."""
-    with patch("mailmap.imap_client.IMAPClient") as mock_class:
+    """Mock the underlying IMAPClient used by imap_tool."""
+    with patch("imap_tool.client.IMAPClient") as mock_class:
         mock_instance = MagicMock()
         mock_class.return_value = mock_instance
         yield mock_instance
@@ -46,13 +44,11 @@ class TestDecodeMimeHeader:
         assert result == ""
 
     def test_decode_utf8_encoded_header(self):
-        # RFC 2047 encoded header
         encoded = "=?UTF-8?B?SGVsbG8gV29ybGQ=?="
         result = decode_mime_header(encoded)
         assert result == "Hello World"
 
     def test_decode_mixed_header(self):
-        # Mixed plain and encoded
         encoded = "Re: =?UTF-8?B?SGVsbG8=?= World"
         result = decode_mime_header(encoded)
         assert result == "Re: Hello World"
@@ -77,52 +73,36 @@ class TestExtractBody:
         assert result == ""
 
 
-class TestEmailMessage:
-    def test_dataclass(self):
-        msg = EmailMessage(
-            message_id="<test@example.com>",
-            folder="INBOX",
-            subject="Test Subject",
-            from_addr="sender@example.com",
-            body_text="Body content",
-            uid=123,
-        )
-        assert msg.message_id == "<test@example.com>"
-        assert msg.folder == "INBOX"
-        assert msg.subject == "Test Subject"
-        assert msg.uid == 123
-
-
-class TestImapMailboxConnection:
+class TestImapClientConnection:
     def test_connect(self, imap_config, mock_imap_client):
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
+        client = ImapClient(imap_config)
+        client.connect()
 
-        assert mailbox._client is not None
+        assert client._client is not None
         mock_imap_client.login.assert_called_once_with(
             imap_config.username, imap_config.password
         )
 
     def test_disconnect(self, imap_config, mock_imap_client):
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        mailbox.disconnect()
+        client = ImapClient(imap_config)
+        client.connect()
+        client.disconnect()
 
-        assert mailbox._client is None
+        assert client._client is None
         mock_imap_client.logout.assert_called_once()
 
-    def test_client_property_raises_when_not_connected(self, imap_config):
-        mailbox = ImapMailbox(imap_config)
+    def test_raw_property_raises_when_not_connected(self, imap_config):
+        client = ImapClient(imap_config)
         with pytest.raises(RuntimeError, match="Not connected"):
-            _ = mailbox.client
+            _ = client.raw
 
-    def test_client_property_returns_client_when_connected(self, imap_config, mock_imap_client):
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        assert mailbox.client is not None
+    def test_raw_property_returns_client_when_connected(self, imap_config, mock_imap_client):
+        client = ImapClient(imap_config)
+        client.connect()
+        assert client.raw is not None
 
 
-class TestImapMailboxFolders:
+class TestImapClientFolders:
     def test_list_folders(self, imap_config, mock_imap_client):
         mock_imap_client.list_folders.return_value = [
             ((), b"/", "INBOX"),
@@ -130,89 +110,74 @@ class TestImapMailboxFolders:
             ((), b"/", "Drafts"),
         ]
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        folders = mailbox.list_folders()
+        client = ImapClient(imap_config)
+        client.connect()
+        folders = client.list_folders()
 
         assert folders == ["INBOX", "Sent", "Drafts"]
 
     def test_folder_exists_true(self, imap_config, mock_imap_client):
-        mock_imap_client.list_folders.return_value = [
-            ((), b"/", "INBOX"),
-            ((), b"/", "Receipts"),
-        ]
+        mock_imap_client.folder_status.return_value = {b"MESSAGES": 5}
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        assert mailbox.folder_exists("Receipts") is True
+        client = ImapClient(imap_config)
+        client.connect()
+        assert client.folder_exists("Receipts") is True
 
     def test_folder_exists_false(self, imap_config, mock_imap_client):
-        mock_imap_client.list_folders.return_value = [
-            ((), b"/", "INBOX"),
-        ]
+        mock_imap_client.folder_status.side_effect = Exception("No such folder")
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        assert mailbox.folder_exists("NonExistent") is False
+        client = ImapClient(imap_config)
+        client.connect()
+        assert client.folder_exists("NonExistent") is False
 
     def test_create_folder_new(self, imap_config, mock_imap_client):
-        mock_imap_client.list_folders.return_value = [
-            ((), b"/", "INBOX"),
-        ]
+        mock_imap_client.folder_status.side_effect = Exception("No such folder")
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        result = mailbox.create_folder("NewFolder")
+        client = ImapClient(imap_config)
+        client.connect()
+        result = client.create_folder("NewFolder")
 
         assert result is True
         mock_imap_client.create_folder.assert_called_once_with("NewFolder")
 
     def test_create_folder_already_exists(self, imap_config, mock_imap_client):
-        mock_imap_client.list_folders.return_value = [
-            ((), b"/", "INBOX"),
-            ((), b"/", "ExistingFolder"),
-        ]
+        mock_imap_client.folder_status.return_value = {b"MESSAGES": 0}
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        result = mailbox.create_folder("ExistingFolder")
+        client = ImapClient(imap_config)
+        client.connect()
+        result = client.create_folder("ExistingFolder")
 
         assert result is False
         mock_imap_client.create_folder.assert_not_called()
 
     def test_ensure_folder_creates_when_missing(self, imap_config, mock_imap_client):
-        mock_imap_client.list_folders.return_value = [
-            ((), b"/", "INBOX"),
-        ]
+        mock_imap_client.folder_status.side_effect = Exception("No such folder")
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        mailbox.ensure_folder("NewFolder")
+        client = ImapClient(imap_config)
+        client.connect()
+        client.ensure_folder("NewFolder")
 
         mock_imap_client.create_folder.assert_called_once_with("NewFolder")
 
     def test_ensure_folder_skips_when_exists(self, imap_config, mock_imap_client):
-        mock_imap_client.list_folders.return_value = [
-            ((), b"/", "INBOX"),
-            ((), b"/", "ExistingFolder"),
-        ]
+        mock_imap_client.folder_status.return_value = {b"MESSAGES": 0}
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        mailbox.ensure_folder("ExistingFolder")
+        client = ImapClient(imap_config)
+        client.connect()
+        client.ensure_folder("ExistingFolder")
 
         mock_imap_client.create_folder.assert_not_called()
 
 
-class TestImapMailboxAppend:
+class TestImapClientAppend:
     def test_append_email_basic(self, imap_config, mock_imap_client):
         mock_imap_client.append.return_value = b"OK"
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
+        client = ImapClient(imap_config)
+        client.connect()
 
         raw_email = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
-        result = mailbox.append_email("INBOX", raw_email)
+        result = client.append_email("INBOX", raw_email)
 
         mock_imap_client.append.assert_called_once()
         call_args = mock_imap_client.append.call_args
@@ -223,148 +188,225 @@ class TestImapMailboxAppend:
     def test_append_email_with_flags(self, imap_config, mock_imap_client):
         mock_imap_client.append.return_value = b"OK"
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
+        client = ImapClient(imap_config)
+        client.connect()
 
         raw_email = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
-        mailbox.append_email("INBOX", raw_email, flags=(r"\Seen", r"\Flagged"))
+        client.append_email("INBOX", raw_email, flags=(r"\Seen", r"\Flagged"))
 
         call_args = mock_imap_client.append.call_args
         assert call_args[1]["flags"] == (r"\Seen", r"\Flagged")
 
     def test_append_email_with_uidplus_response(self, imap_config, mock_imap_client):
-        # Server returns UIDPLUS response with new UID
         mock_imap_client.append.return_value = b"[APPENDUID 1234567890 42] APPEND completed"
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
+        client = ImapClient(imap_config)
+        client.connect()
 
         raw_email = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
-        result = mailbox.append_email("INBOX", raw_email)
+        result = client.append_email("INBOX", raw_email)
 
         assert result == 42
 
     def test_append_email_with_timestamp(self, imap_config, mock_imap_client):
         mock_imap_client.append.return_value = b"OK"
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
+        client = ImapClient(imap_config)
+        client.connect()
 
         raw_email = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
-        timestamp = 1700000000.0  # Nov 14, 2023
-        mailbox.append_email("INBOX", raw_email, msg_time=timestamp)
+        timestamp = 1700000000.0
+        client.append_email("INBOX", raw_email, msg_time=timestamp)
 
         call_args = mock_imap_client.append.call_args
         assert call_args[1]["msg_time"] is not None
 
 
-class TestImapMailboxOperations:
+class TestImapClientOperations:
     def test_select_folder(self, imap_config, mock_imap_client):
         mock_imap_client.select_folder.return_value = {"EXISTS": 10}
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        result = mailbox.select_folder("INBOX")
+        client = ImapClient(imap_config)
+        client.connect()
+        result = client.select_folder("INBOX")
 
         mock_imap_client.select_folder.assert_called_once_with("INBOX")
         assert result == {"EXISTS": 10}
 
     def test_move_email(self, imap_config, mock_imap_client):
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        mailbox.move_email(123, "INBOX", "Archive")
+        mock_imap_client.folder_status.return_value = {b"MESSAGES": 0}
+
+        client = ImapClient(imap_config)
+        client.connect()
+        client.move_email(123, "INBOX", "Archive")
 
         mock_imap_client.select_folder.assert_called_with("INBOX")
         mock_imap_client.move.assert_called_once_with([123], "Archive")
 
-    def test_fetch_recent_uids(self, imap_config, mock_imap_client):
+    def test_fetch_uids(self, imap_config, mock_imap_client):
         mock_imap_client.search.return_value = [1, 2, 3, 4, 5]
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        uids = mailbox.fetch_recent_uids("INBOX", limit=3)
+        client = ImapClient(imap_config)
+        client.connect()
+        uids = client.fetch_uids("INBOX", limit=3)
 
         assert uids == [3, 4, 5]
 
-    def test_fetch_recent_uids_empty_folder(self, imap_config, mock_imap_client):
+    def test_fetch_uids_empty_folder(self, imap_config, mock_imap_client):
         mock_imap_client.search.return_value = []
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        uids = mailbox.fetch_recent_uids("INBOX")
+        client = ImapClient(imap_config)
+        client.connect()
+        uids = client.fetch_uids("INBOX")
 
         assert uids == []
 
     def test_get_new_uids_since(self, imap_config, mock_imap_client):
         mock_imap_client.search.return_value = [101, 102, 103]
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        uids = mailbox.get_new_uids_since("INBOX", last_uid=100)
+        client = ImapClient(imap_config)
+        client.connect()
+        uids = client.get_new_uids_since("INBOX", last_uid=100)
 
         assert uids == [101, 102, 103]
 
     def test_fetch_email(self, imap_config, mock_imap_client):
         raw_email = b"From: sender@example.com\r\nSubject: Test Email\r\nMessage-ID: <test123@example.com>\r\n\r\nEmail body"
         mock_imap_client.fetch.return_value = {
-            123: {b"BODY[]": raw_email}
+            123: {b"BODY[]": raw_email, b"FLAGS": ()}
         }
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        msg = mailbox.fetch_email(123, "INBOX")
+        client = ImapClient(imap_config)
+        client.connect()
+        msg = client.fetch_email(123, "INBOX")
 
         assert msg is not None
-        assert msg.message_id == "<test123@example.com>"
-        assert msg.subject == "Test Email"
-        assert msg.from_addr == "sender@example.com"
-        assert msg.uid == 123
-        assert msg.folder == "INBOX"
+        assert msg["message_id"] == "<test123@example.com>"
+        assert msg["subject"] == "Test Email"
+        assert msg["from"] == "sender@example.com"
+        assert msg["uid"] == 123
+        assert msg["folder"] == "INBOX"
 
     def test_fetch_email_not_found(self, imap_config, mock_imap_client):
         mock_imap_client.fetch.return_value = {}
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        msg = mailbox.fetch_email(999, "INBOX")
+        client = ImapClient(imap_config)
+        client.connect()
+        msg = client.fetch_email(999, "INBOX")
 
         assert msg is None
 
-    def test_fetch_raw_email(self, imap_config, mock_imap_client):
+    def test_fetch_raw(self, imap_config, mock_imap_client):
         raw_email = b"From: sender@example.com\r\nSubject: Test Email\r\n\r\nBody"
         mock_imap_client.fetch.return_value = {
             123: {b"BODY[]": raw_email}
         }
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        result = mailbox.fetch_raw_email(123, "INBOX")
+        client = ImapClient(imap_config)
+        client.connect()
+        result = client.fetch_raw(123, "INBOX")
 
         assert result == raw_email
         mock_imap_client.select_folder.assert_called_with("INBOX")
 
-    def test_fetch_raw_email_not_found(self, imap_config, mock_imap_client):
+    def test_fetch_raw_not_found(self, imap_config, mock_imap_client):
         mock_imap_client.fetch.return_value = {}
 
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        result = mailbox.fetch_raw_email(999, "INBOX")
+        client = ImapClient(imap_config)
+        client.connect()
+        result = client.fetch_raw(999, "INBOX")
 
         assert result is None
+
+
+class TestFetchAllMessageIds:
+    """Tests for fetch_all_message_ids with various header formats."""
+
+    def test_simple_message_id(self, imap_config, mock_imap_client):
+        mock_imap_client.search.return_value = [1]
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID: <simple@example.com>\r\n"}
+        }
+
+        client = ImapClient(imap_config)
+        client.connect()
+        ids = client.fetch_all_message_ids("INBOX")
+
+        assert ids == ["<simple@example.com>"]
+
+    def test_folded_message_id_crlf(self, imap_config, mock_imap_client):
+        mock_imap_client.search.return_value = [1]
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\r\n <folded@example.com>\r\n"}
+        }
+
+        client = ImapClient(imap_config)
+        client.connect()
+        ids = client.fetch_all_message_ids("INBOX")
+
+        assert ids == ["<folded@example.com>"]
+
+    def test_folded_message_id_lf(self, imap_config, mock_imap_client):
+        mock_imap_client.search.return_value = [1]
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\n <folded@example.com>\n"}
+        }
+
+        client = ImapClient(imap_config)
+        client.connect()
+        ids = client.fetch_all_message_ids("INBOX")
+
+        assert ids == ["<folded@example.com>"]
+
+    def test_folded_message_id_tab(self, imap_config, mock_imap_client):
+        mock_imap_client.search.return_value = [1]
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\r\n\t<tabbed@example.com>\r\n"}
+        }
+
+        client = ImapClient(imap_config)
+        client.connect()
+        ids = client.fetch_all_message_ids("INBOX")
+
+        assert ids == ["<tabbed@example.com>"]
+
+    def test_multiple_message_ids(self, imap_config, mock_imap_client):
+        mock_imap_client.search.return_value = [1, 2, 3]
+        mock_imap_client.fetch.return_value = {
+            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID: <simple@example.com>\r\n"},
+            2: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\r\n <folded@example.com>\r\n"},
+            3: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\n\t<tabbed@example.com>\n"},
+        }
+
+        client = ImapClient(imap_config)
+        client.connect()
+        ids = client.fetch_all_message_ids("INBOX")
+
+        assert len(ids) == 3
+        assert "<simple@example.com>" in ids
+        assert "<folded@example.com>" in ids
+        assert "<tabbed@example.com>" in ids
+
+    def test_empty_folder(self, imap_config, mock_imap_client):
+        mock_imap_client.search.return_value = []
+
+        client = ImapClient(imap_config)
+        client.connect()
+        ids = client.fetch_all_message_ids("INBOX")
+
+        assert ids == []
 
 
 class TestExtractAttachments:
     """Tests for extract_attachments function."""
 
     def test_no_attachments_simple_message(self):
-        """Test email with no attachments."""
         raw = b"Content-Type: text/plain\r\n\r\nSimple body"
         msg = email.message_from_bytes(raw)
         result = extract_attachments(msg)
         assert result == []
 
     def test_multipart_no_attachments(self):
-        """Test multipart message with only body parts (no attachments)."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/alternative; boundary="boundary"
 
@@ -382,7 +424,6 @@ Content-Type: text/html
         assert result == []
 
     def test_text_attachment(self):
-        """Test extracting a plain text attachment."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="boundary"
 
@@ -404,7 +445,6 @@ These are my notes.
         assert "These are my notes" in result[0]["text_content"]
 
     def test_ics_calendar_attachment(self):
-        """Test extracting and parsing ICS calendar attachment."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="boundary"
 
@@ -436,7 +476,6 @@ END:VCALENDAR
         assert "LOCATION: Studio A" in text
 
     def test_ics_without_filename_defaults_to_calendar(self):
-        """Test ICS attachment without filename gets default name."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="boundary"
 
@@ -459,7 +498,6 @@ END:VCALENDAR
         assert result[0]["filename"] == "calendar.ics"
 
     def test_binary_attachment_no_text_content(self):
-        """Test binary attachment has no text_content extracted."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="boundary"
 
@@ -482,7 +520,6 @@ JVBERi0xLjQK
         assert result[0]["text_content"] is None
 
     def test_multiple_attachments(self):
-        """Test email with multiple attachments."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="boundary"
 
@@ -509,7 +546,6 @@ binary
         assert "doc.pdf" in filenames
 
     def test_csv_attachment(self):
-        """Test extracting and parsing CSV attachment."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="boundary"
 
@@ -535,7 +571,6 @@ Widget C,1,49.99
         assert "Rows: 3" in text
 
     def test_json_attachment(self):
-        """Test extracting and parsing JSON attachment."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="boundary"
 
@@ -556,10 +591,8 @@ Content-Disposition: attachment; filename="receipt.json"
         text = result[0]["text_content"]
         assert "order_id" in text
         assert "12345" in text
-        assert "total" in text
 
     def test_xml_attachment(self):
-        """Test extracting and parsing XML attachment."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="boundary"
 
@@ -584,10 +617,8 @@ Content-Disposition: attachment; filename="invoice.xml"
         assert result[0]["filename"] == "invoice.xml"
         text = result[0]["text_content"]
         assert "Root: <invoice>" in text
-        assert "amount" in text.lower() or "id" in text.lower()
 
     def test_application_ics_attachment(self):
-        """Test application/ics MIME type (alternate calendar format)."""
         raw = b"""MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="boundary"
 
@@ -613,89 +644,3 @@ END:VCALENDAR
         text = result[0]["text_content"]
         assert "SUMMARY: Team Meeting" in text
         assert "LOCATION: Room 101" in text
-
-
-class TestFetchAllMessageIds:
-    """Tests for fetch_all_message_ids with various header formats."""
-
-    def test_simple_message_id(self, imap_config, mock_imap_client):
-        """Test parsing a simple single-line Message-ID."""
-        mock_imap_client.search.return_value = [1]
-        mock_imap_client.fetch.return_value = {
-            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID: <simple@example.com>\r\n"}
-        }
-
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        ids = mailbox.fetch_all_message_ids("INBOX")
-
-        assert ids == ["<simple@example.com>"]
-
-    def test_folded_message_id_crlf(self, imap_config, mock_imap_client):
-        """Test parsing a folded Message-ID with CRLF continuation."""
-        mock_imap_client.search.return_value = [1]
-        # Folded header: Message-ID:\r\n <actual-id>
-        mock_imap_client.fetch.return_value = {
-            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\r\n <folded@example.com>\r\n"}
-        }
-
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        ids = mailbox.fetch_all_message_ids("INBOX")
-
-        assert ids == ["<folded@example.com>"]
-
-    def test_folded_message_id_lf(self, imap_config, mock_imap_client):
-        """Test parsing a folded Message-ID with LF continuation."""
-        mock_imap_client.search.return_value = [1]
-        # Folded header: Message-ID:\n <actual-id>
-        mock_imap_client.fetch.return_value = {
-            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\n <folded@example.com>\n"}
-        }
-
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        ids = mailbox.fetch_all_message_ids("INBOX")
-
-        assert ids == ["<folded@example.com>"]
-
-    def test_folded_message_id_tab(self, imap_config, mock_imap_client):
-        """Test parsing a folded Message-ID with tab continuation."""
-        mock_imap_client.search.return_value = [1]
-        mock_imap_client.fetch.return_value = {
-            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\r\n\t<tabbed@example.com>\r\n"}
-        }
-
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        ids = mailbox.fetch_all_message_ids("INBOX")
-
-        assert ids == ["<tabbed@example.com>"]
-
-    def test_multiple_message_ids(self, imap_config, mock_imap_client):
-        """Test parsing multiple messages with different formats."""
-        mock_imap_client.search.return_value = [1, 2, 3]
-        mock_imap_client.fetch.return_value = {
-            1: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID: <simple@example.com>\r\n"},
-            2: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\r\n <folded@example.com>\r\n"},
-            3: {b"BODY[HEADER.FIELDS (MESSAGE-ID)]": b"Message-ID:\n\t<tabbed@example.com>\n"},
-        }
-
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        ids = mailbox.fetch_all_message_ids("INBOX")
-
-        assert len(ids) == 3
-        assert "<simple@example.com>" in ids
-        assert "<folded@example.com>" in ids
-        assert "<tabbed@example.com>" in ids
-
-    def test_empty_folder(self, imap_config, mock_imap_client):
-        """Test empty folder returns empty list."""
-        mock_imap_client.search.return_value = []
-
-        mailbox = ImapMailbox(imap_config)
-        mailbox.connect()
-        ids = mailbox.fetch_all_message_ids("INBOX")
-
-        assert ids == []

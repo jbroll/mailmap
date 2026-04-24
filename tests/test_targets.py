@@ -220,17 +220,17 @@ class TestImapTargetWithRawBytes:
         target = ImapTarget(config)
 
         # Mock the mailbox
-        mock_mailbox = MagicMock()
-        mock_mailbox.ensure_folder = MagicMock()
-        mock_mailbox.append_email = MagicMock()
-        target._mailbox = mock_mailbox
+        mock_client = MagicMock()
+        mock_client.ensure_folder = MagicMock()
+        mock_client.append_email = MagicMock()
+        target._client = mock_client
 
         raw_content = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
         result = await target.copy_email("<msg@example.com>", "Inbox", raw_bytes=raw_content)
 
         assert result is True
-        mock_mailbox.ensure_folder.assert_called_once_with("Inbox")
-        mock_mailbox.append_email.assert_called_once_with("Inbox", raw_content)
+        mock_client.ensure_folder.assert_called_once_with("Inbox")
+        mock_client.append_email.assert_called_once_with("Inbox", raw_content)
 
     @pytest.mark.asyncio
     async def test_move_email_with_raw_bytes_uploads_directly(self):
@@ -239,17 +239,17 @@ class TestImapTargetWithRawBytes:
         target = ImapTarget(config)
 
         # Mock the mailbox
-        mock_mailbox = MagicMock()
-        mock_mailbox.ensure_folder = MagicMock()
-        mock_mailbox.append_email = MagicMock()
-        target._mailbox = mock_mailbox
+        mock_client = MagicMock()
+        mock_client.ensure_folder = MagicMock()
+        mock_client.append_email = MagicMock()
+        target._client = mock_client
 
         raw_content = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
         result = await target.move_email("<msg@example.com>", "Archive", raw_bytes=raw_content)
 
         assert result is True
-        mock_mailbox.ensure_folder.assert_called_once_with("Archive")
-        mock_mailbox.append_email.assert_called_once_with("Archive", raw_content)
+        mock_client.ensure_folder.assert_called_once_with("Archive")
+        mock_client.append_email.assert_called_once_with("Archive", raw_content)
 
 
 class TestImapTargetDuplicatePrevention:
@@ -262,24 +262,24 @@ class TestImapTargetDuplicatePrevention:
         target = ImapTarget(config)
 
         # Mock the mailbox
-        mock_mailbox = MagicMock()
-        mock_mailbox.ensure_folder = MagicMock()
-        mock_mailbox.list_folders = MagicMock(return_value=["INBOX", "Personal"])
-        mock_mailbox.select_folder = MagicMock()
+        mock_client = MagicMock()
+        mock_client.ensure_folder = MagicMock()
+        mock_client.list_folders = MagicMock(return_value=["INBOX", "Personal"])
+        mock_client.select_folder = MagicMock()
         # Email is NOT in INBOX (empty search), but IS in Personal (the target)
-        mock_mailbox.client.search = MagicMock(side_effect=[
+        mock_client.search = MagicMock(side_effect=[
             [],     # Not in INBOX
             [123],  # Found in Personal (target folder)
         ])
-        mock_mailbox.append_email = MagicMock()
-        target._mailbox = mock_mailbox
+        mock_client.append_email = MagicMock()
+        target._client = mock_client
 
         # Try to copy to "Personal" when email is already there
         result = await target.copy_email("<msg@example.com>", "Personal", raw_bytes=None)
 
         assert result is True
         # append_email should NOT be called since email is already in target
-        mock_mailbox.append_email.assert_not_called()
+        mock_client.append_email.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_copy_email_copies_if_in_different_folder(self):
@@ -288,24 +288,22 @@ class TestImapTargetDuplicatePrevention:
         target = ImapTarget(config)
 
         # Mock the mailbox
-        mock_mailbox = MagicMock()
-        mock_mailbox.ensure_folder = MagicMock()
-        mock_mailbox.list_folders = MagicMock(return_value=["INBOX", "Personal"])
-        mock_mailbox.select_folder = MagicMock()
+        mock_client = MagicMock()
+        mock_client.ensure_folder = MagicMock()
+        mock_client.list_folders = MagicMock(return_value=["INBOX", "Personal"])
+        mock_client.select_folder = MagicMock()
         # Email is in INBOX, not Personal
-        mock_mailbox.client.search = MagicMock(side_effect=[
+        mock_client.search = MagicMock(side_effect=[
             [123],  # Found in INBOX
         ])
-        mock_mailbox.client.fetch = MagicMock(return_value={
-            123: {b"BODY[]": b"raw email content"}
-        })
-        mock_mailbox.append_email = MagicMock()
-        target._mailbox = mock_mailbox
+        mock_client.fetch_raw = MagicMock(return_value=b"raw email content")
+        mock_client.append_email = MagicMock()
+        target._client = mock_client
 
         result = await target.copy_email("<msg@example.com>", "Personal", raw_bytes=None)
 
         assert result is True
-        mock_mailbox.append_email.assert_called_once_with("Personal", b"raw email content")
+        mock_client.append_email.assert_called_once_with("Personal", b"raw email content")
 
 
 class TestEmailTargetProtocol:

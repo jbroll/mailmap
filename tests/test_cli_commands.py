@@ -15,9 +15,6 @@ from mailmap.commands.imap_ops import (
 )
 from mailmap.config import Config, DatabaseConfig, ImapConfig, OllamaConfig, ThunderbirdConfig
 from mailmap.email import UnifiedEmail
-from mailmap.imap_client import EmailMessage
-
-
 @pytest.fixture
 def config():
     """Create a test configuration."""
@@ -36,8 +33,8 @@ def config():
 
 @pytest.fixture
 def mock_imap_mailbox():
-    """Create a mock ImapMailbox."""
-    with patch("mailmap.commands.imap_ops.ImapMailbox") as mock_class:
+    """Create a mock ImapClient."""
+    with patch("mailmap.commands.imap_ops.ImapClient") as mock_class:
         mock_instance = MagicMock()
         mock_class.return_value = mock_instance
         yield mock_instance
@@ -152,14 +149,14 @@ class TestReadEmailCmd:
     @pytest.mark.asyncio
     async def test_read_email(self, config, mock_imap_mailbox, capsys):
         """Test reading an email."""
-        mock_imap_mailbox.fetch_email.return_value = EmailMessage(
-            message_id="<test@example.com>",
-            folder="INBOX",
-            subject="Test Subject",
-            from_addr="sender@example.com",
-            body_text="This is the email body.",
-            uid=123,
-        )
+        mock_imap_mailbox.fetch_email.return_value = {
+            "message_id": "<test@example.com>",
+            "folder": "INBOX",
+            "subject": "Test Subject",
+            "from": "sender@example.com",
+            "body": "This is the email body.",
+            "uid": 123,
+        }
 
         await read_email_cmd(config, "INBOX", 123)
 
@@ -261,12 +258,9 @@ class TestMoveEmailCmd:
 class TestCopyEmailCmd:
     def test_copy_email(self, config, mock_imap_mailbox):
         """Test copying an email."""
-        mock_imap_mailbox.client = MagicMock()
-
         copy_email_cmd(config, "INBOX", 123, "Archive")
 
         mock_imap_mailbox.connect.assert_called_once()
         mock_imap_mailbox.ensure_folder.assert_called_once_with("Archive")
-        mock_imap_mailbox.select_folder.assert_called_once_with("INBOX")
-        mock_imap_mailbox.client.copy.assert_called_once_with([123], "Archive")
+        mock_imap_mailbox.copy_email.assert_called_once_with(123, "INBOX", "Archive")
         mock_imap_mailbox.disconnect.assert_called_once()

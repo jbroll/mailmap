@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from ..config import Config
-from ..imap_client import ImapMailbox
+from ..imap_client import ImapClient
 
 logger = logging.getLogger("mailmap")
 
@@ -80,24 +80,24 @@ async def read_email_cmd(
         folder: Folder name
         uid: Email UID
     """
-    mailbox = ImapMailbox(config.imap)
-    mailbox.connect()
+    client = ImapClient(config.imap)
+    client.connect()
 
     try:
-        email = mailbox.fetch_email(uid, folder)
-        if not email:
+        msg = client.fetch_email(uid, folder)
+        if not msg:
             logger.error(f"Email UID {uid} not found in {folder}")
             return
 
-        print(f"From: {email.from_addr}")
-        print(f"Subject: {email.subject}")
-        print(f"Message-ID: {email.message_id}")
-        print(f"Folder: {email.folder}")
-        print(f"UID: {email.uid}")
+        print(f"From: {msg['from']}")
+        print(f"Subject: {msg['subject']}")
+        print(f"Message-ID: {msg['message_id']}")
+        print(f"Folder: {msg['folder']}")
+        print(f"UID: {msg['uid']}")
         print("-" * 60)
-        print(email.body_text or "(no body)")
+        print(msg.get("body") or "(no body)")
     finally:
-        mailbox.disconnect()
+        client.disconnect()
 
 
 async def create_folder_cmd(
@@ -180,15 +180,15 @@ def move_email_cmd(config: Config, folder: str, uid: int, dest: str) -> None:
         uid: Email UID
         dest: Destination folder
     """
-    mailbox = ImapMailbox(config.imap)
-    mailbox.connect()
+    client = ImapClient(config.imap)
+    client.connect()
 
     try:
-        mailbox.ensure_folder(dest)
-        mailbox.move_email(uid, folder, dest)
+        client.ensure_folder(dest)
+        client.move_email(uid, folder, dest)
         logger.info(f"Moved UID {uid} from {folder} to {dest}")
     finally:
-        mailbox.disconnect()
+        client.disconnect()
 
 
 def copy_email_cmd(config: Config, folder: str, uid: int, dest: str) -> None:
@@ -200,13 +200,12 @@ def copy_email_cmd(config: Config, folder: str, uid: int, dest: str) -> None:
         uid: Email UID
         dest: Destination folder
     """
-    mailbox = ImapMailbox(config.imap)
-    mailbox.connect()
+    client = ImapClient(config.imap)
+    client.connect()
 
     try:
-        mailbox.ensure_folder(dest)
-        mailbox.select_folder(folder)
-        mailbox.client.copy([uid], dest)
+        client.ensure_folder(dest)
+        client.copy_email(uid, folder, dest)
         logger.info(f"Copied UID {uid} from {folder} to {dest}")
     finally:
-        mailbox.disconnect()
+        client.disconnect()

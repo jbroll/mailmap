@@ -118,19 +118,22 @@ def sync_transfers(config: Config, db: Database, dry_run: bool = False) -> None:
     This clears all transferred_at values, then scans category folders
     on the IMAP server and marks emails found there as transferred.
 
+    Also detects classification drift: emails the user manually moved to a
+    different folder than the DB thinks they belong to. Those emails have
+    their DB classification updated and affected centroids are recomputed.
+
     Args:
         config: Application configuration
         db: Database instance
         dry_run: If True, only report what would be done
     """
     from ..categories import load_categories
-    from ..imap_client import ImapMailbox
+    from ..imap_client import ImapClient
 
     db.connect()
     db.init_schema()
 
     try:
-        # Load categories to know which folders to scan
         categories_path = Path(config.database.categories_file)
         categories = load_categories(categories_path)
 
@@ -141,7 +144,6 @@ def sync_transfers(config: Config, db: Database, dry_run: bool = False) -> None:
         category_folders = [cat.name for cat in categories]
         logger.info(f"Will scan {len(category_folders)} category folders")
 
-        # Get current transfer stats
         before_count = db.get_transferred_count()
         total_emails = db.get_total_count()
 
@@ -151,14 +153,15 @@ def sync_transfers(config: Config, db: Database, dry_run: bool = False) -> None:
             cleared = db.clear_all_transfers()
             logger.info(f"Cleared {cleared} transferred markers")
 
-        # Connect to IMAP
-        mailbox = ImapMailbox(config.imap)
-        mailbox.connect()
+        client = ImapClient(config.imap)
+        client.connect()
         logger.info(f"Connected to {config.imap.host}")
 
+        drift_count = 0
+        dirty_folders: set[str] = set()
+
         try:
-            # Get list of existing folders on server
-            server_folders = set(mailbox.list_folders())
+            server_folders = set(client.list_folders())
 
             total_found = 0
             total_marked = 0
@@ -168,9 +171,8 @@ def sync_transfers(config: Config, db: Database, dry_run: bool = False) -> None:
                     logger.debug(f"  {folder}: not on server, skipping")
                     continue
 
-                # Fetch all message IDs from this folder
                 try:
-                    message_ids = mailbox.fetch_all_message_ids(folder)
+                    message_ids = client.fetch_all_message_ids(folder)
                 except Exception as e:
                     logger.warning(f"  {folder}: error fetching - {e}")
                     continue
@@ -184,17 +186,40 @@ def sync_transfers(config: Config, db: Database, dry_run: bool = False) -> None:
                 if dry_run:
                     logger.info(f"  {folder}: found {len(message_ids)} emails")
                 else:
-                    # Mark these as transferred in DB
                     marked = db.mark_many_as_transferred(message_ids)
                     total_marked += marked
                     logger.info(f"  {folder}: {len(message_ids)} found, {marked} marked")
 
-            # Summary
+                # Drift detection: find emails whose DB classification differs
+                # from the folder they're actually sitting in on the server.
+                for msg_id in message_ids:
+                    existing = db.get_email(msg_id)
+                    if existing is None:
+                        continue
+                    if existing.classification and existing.classification != folder:
+                        drift_count += 1
+                        if dry_run:
+                            logger.info(
+                                f"  [drift] {msg_id[:40]} was '{existing.classification}'"
+                                f" → now in '{folder}'"
+                            )
+                        else:
+                            logger.info(
+                                f"  [drift] updating {msg_id[:40]}: "
+                                f"'{existing.classification}' → '{folder}'"
+                            )
+                            old_folder = existing.classification
+                            db.update_classification(msg_id, folder, confidence=1.0)
+                            dirty_folders.add(folder)
+                            if old_folder:
+                                dirty_folders.add(old_folder)
+
             after_count = db.get_transferred_count() if not dry_run else 0
 
             logger.info("")
             if dry_run:
                 logger.info(f"[DRY RUN] Would mark up to {total_found} emails as transferred")
+                logger.info(f"[DRY RUN] {drift_count} classification drift(s) detected")
                 logger.info(f"Total emails in DB: {total_emails}")
             else:
                 logger.info(f"Sync complete: {after_count} emails marked as transferred")
@@ -206,11 +231,58 @@ def sync_transfers(config: Config, db: Database, dry_run: bool = False) -> None:
                     if untransferred > 0:
                         logger.info(f"Classified but not transferred: {untransferred}")
 
+                # Recompute centroids for folders touched by manual moves.
+                if dirty_folders:
+                    logger.info(f"Recomputing centroids for {len(dirty_folders)} folder(s)...")
+                    _recompute_centroids(config, db, dirty_folders)
+
         finally:
-            mailbox.disconnect()
+            client.disconnect()
 
     finally:
         db.close()
+
+
+def _recompute_centroids(config: Config, db: Database, folders: set[str]) -> None:
+    """Recompute embedding centroids for a set of folders using stored embeddings."""
+    from ..embedding import centroid, vec_from_bytes, vec_to_bytes
+
+    min_ex = config.embedding.min_examples
+    for folder in sorted(folders):
+        rows = db.get_embeddings_by_classification(folder)
+        if len(rows) < min_ex:
+            db.delete_centroid(folder)
+            logger.info(f"  {folder}: {len(rows)} embeddings < {min_ex} — centroid removed")
+            continue
+        vecs = [vec_from_bytes(blob) for _, blob in rows]
+        c = centroid(vecs)
+        db.upsert_centroid(folder, vec_to_bytes(c), len(vecs))
+        logger.info(f"  {folder}: centroid updated ({len(vecs)} embeddings)")
+
+
+def _get_message_ids_with_uids(client, folder: str) -> list[tuple[int, str]]:
+    """Return [(uid, message_id), ...] for all messages in folder."""
+    client.select_folder(folder)
+    uids = list(client.raw.search(["ALL"]))
+    if not uids:
+        return []
+    messages = client.raw.fetch(uids, ["BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]"])
+    result = []
+    for uid in uids:
+        data = messages.get(uid, {})
+        header_data = data.get(b"BODY[HEADER.FIELDS (MESSAGE-ID)]", b"")
+        if not header_data:
+            continue
+        header_str = header_data.decode("utf-8", errors="replace")
+        header_str = header_str.replace("\r\n ", " ").replace("\r\n\t", " ")
+        header_str = header_str.replace("\n ", " ").replace("\n\t", " ")
+        for line in header_str.split("\n"):
+            if line.lower().startswith("message-id:"):
+                msg_id = line.split(":", 1)[1].strip()
+                if msg_id:
+                    result.append((uid, msg_id))
+                break
+    return result
 
 
 def dedup_folders(config: Config, dry_run: bool = False) -> int:
@@ -227,7 +299,7 @@ def dedup_folders(config: Config, dry_run: bool = False) -> int:
         Number of duplicates removed
     """
     from ..categories import load_categories
-    from ..imap_client import ImapMailbox
+    from ..imap_client import ImapClient
 
     categories_path = Path(config.database.categories_file)
     categories = load_categories(categories_path)
@@ -239,54 +311,29 @@ def dedup_folders(config: Config, dry_run: bool = False) -> int:
     category_folders = [cat.name for cat in categories]
     logger.info(f"Scanning {len(category_folders)} category folders for duplicates")
 
-    mailbox = ImapMailbox(config.imap)
-    mailbox.connect()
+    client = ImapClient(config.imap)
+    client.connect()
     logger.info(f"Connected to {config.imap.host}")
 
     total_deleted = 0
 
     try:
-        server_folders = set(mailbox.list_folders())
+        server_folders = set(client.list_folders())
 
         for folder in category_folders:
             if folder not in server_folders:
                 continue
 
-            mailbox.select_folder(folder)
-            uids = mailbox.client.search(["ALL"])
+            # fetch_all_message_ids selects the folder and fetches headers in one pass
+            msg_ids_with_uids = _get_message_ids_with_uids(client, folder)
 
-            if not uids:
+            if not msg_ids_with_uids:
                 continue
 
-            # Fetch Message-IDs for all emails
-            messages = mailbox.client.fetch(
-                uids, ["BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]"]
-            )
-
-            # Track seen Message-IDs and duplicates
             seen: dict[str, int] = {}  # message_id -> first UID
             duplicates: list[int] = []
 
-            for uid in uids:
-                data = messages.get(uid, {})
-                header_data = data.get(b"BODY[HEADER.FIELDS (MESSAGE-ID)]", b"")
-                if not header_data:
-                    continue
-
-                # Parse Message-ID (handle folded headers)
-                header_str = header_data.decode("utf-8", errors="replace")
-                header_str = header_str.replace("\r\n ", " ").replace("\r\n\t", " ")
-                header_str = header_str.replace("\n ", " ").replace("\n\t", " ")
-
-                msg_id = None
-                for line in header_str.split("\n"):
-                    if line.lower().startswith("message-id:"):
-                        msg_id = line.split(":", 1)[1].strip()
-                        break
-
-                if not msg_id:
-                    continue
-
+            for uid, msg_id in msg_ids_with_uids:
                 if msg_id in seen:
                     duplicates.append(uid)
                 else:
@@ -296,16 +343,14 @@ def dedup_folders(config: Config, dry_run: bool = False) -> int:
                 if dry_run:
                     logger.info(f"  {folder}: {len(duplicates)} duplicates (would delete)")
                 else:
-                    # Delete duplicates
-                    mailbox.client.delete_messages(duplicates)
-                    mailbox.client.expunge()
+                    client.delete_emails(duplicates, folder)
                     logger.info(f"  {folder}: deleted {len(duplicates)} duplicates")
                 total_deleted += len(duplicates)
             else:
                 logger.debug(f"  {folder}: no duplicates")
 
     finally:
-        mailbox.disconnect()
+        client.disconnect()
 
     if dry_run:
         logger.info(f"[DRY RUN] Would delete {total_deleted} total duplicates")

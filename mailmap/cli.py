@@ -25,6 +25,7 @@ from .commands import (
     reset_database,
     run_bulk_classify,
     run_daemon,
+    run_embed_command,
     run_init_folders,
     run_learn_folders,
     summary_cmd,
@@ -274,6 +275,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum seconds between IMAP operations (default: 1.0)",
     )
 
+    # embed - Bootstrap embeddings and rebuild centroids
+    embed_parser = subparsers.add_parser(
+        "embed", help="Compute email embeddings and rebuild folder centroids"
+    )
+    add_common_args(embed_parser)
+    embed_parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Wipe all stored embeddings and centroids and recompute from scratch",
+    )
+    embed_parser.add_argument(
+        "--seed-from-imap",
+        action="store_true",
+        dest="seed_from_imap",
+        help="Scan all IMAP folders and import emails into DB before embedding",
+    )
+
     # dedup - Remove duplicate emails from category folders
     dedup_parser = subparsers.add_parser(
         "dedup", help="Remove duplicate emails from category folders on IMAP"
@@ -475,6 +493,11 @@ def _run_command(args, config: Config, db: Database) -> None:
     elif args.command == "dedup":
         dry_run = getattr(args, "dry_run", False)
         dedup_folders(config, dry_run=dry_run)
+    elif args.command == "embed":
+        rebuild = getattr(args, "rebuild", False)
+        seed_from_imap = getattr(args, "seed_from_imap", False)
+        with db:
+            asyncio.run(run_embed_command(config, db, rebuild=rebuild, seed_from_imap=seed_from_imap))
 
 
 if __name__ == "__main__":

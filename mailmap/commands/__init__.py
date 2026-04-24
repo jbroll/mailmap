@@ -1,6 +1,7 @@
 """Command implementations for mailmap CLI."""
 
 from .classify import bulk_classify, run_bulk_classify, transfer_emails
+from .embed import run_embed_command
 from .daemon import EmailProcessor, run_daemon, run_listener
 from .imap_ops import (
     copy_email_cmd,
@@ -26,6 +27,8 @@ from .utils import (
 )
 
 __all__ = [
+    # embed
+    "run_embed_command",
     # classify
     "bulk_classify",
     "run_bulk_classify",

@@ -7,7 +7,7 @@ import logging
 from ..categories import load_categories
 from ..config import Config
 from ..database import Database
-from ..imap_client import ImapMailbox
+from ..imap_client import ImapClient
 
 logger = logging.getLogger("mailmap")
 
@@ -55,8 +55,8 @@ def upload_to_imap(
             return
 
         # Connect to IMAP
-        mailbox = ImapMailbox(config.imap)
-        mailbox.connect()
+        client = ImapClient(config.imap)
+        client.connect()
 
         try:
             uploaded = 0
@@ -66,10 +66,8 @@ def upload_to_imap(
             for folder, count in counts.items():
                 logger.info(f"Processing folder: {folder} ({count} emails)")
 
-                # Ensure folder exists
-                mailbox.ensure_folder(folder)
+                client.ensure_folder(folder)
 
-                # Get emails for this classification
                 emails = db.get_emails_by_classification(folder)
 
                 for email_record in emails:
@@ -83,7 +81,7 @@ def upload_to_imap(
                         # IMAP source: mbox_path is UID, folder_id is source folder
                         uid = int(email_record.mbox_path)
                         source_folder = email_record.folder_id
-                        raw_email = mailbox.fetch_raw_email(uid, source_folder)
+                        raw_email = client.fetch_raw(uid, source_folder)
                     else:
                         # Thunderbird source: mbox_path is file path
                         raw_email = get_raw_email(email_record.mbox_path, email_record.message_id)
@@ -93,9 +91,8 @@ def upload_to_imap(
                         errors += 1
                         continue
 
-                    # Upload to IMAP
                     try:
-                        new_uid = mailbox.append_email(folder, raw_email, flags=(r"\Seen",))
+                        new_uid = client.append_email(folder, raw_email, flags=(r"\Seen",))
                         uploaded += 1
                         if new_uid:
                             logger.debug(f"Uploaded {email_record.message_id} to {folder} (UID: {new_uid})")
@@ -108,7 +105,7 @@ def upload_to_imap(
             logger.info(f"Upload complete: {uploaded} uploaded, {skipped} skipped, {errors} errors")
 
         finally:
-            mailbox.disconnect()
+            client.disconnect()
 
     finally:
         db.close()

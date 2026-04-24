@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS emails (
     processed_at TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS folder_centroids (
+    folder TEXT PRIMARY KEY,
+    centroid BLOB NOT NULL,
+    sample_count INTEGER NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_emails_folder ON emails(folder_id);
 CREATE INDEX IF NOT EXISTS idx_emails_classification ON emails(classification);
 CREATE INDEX IF NOT EXISTS idx_emails_is_spam ON emails(is_spam);
@@ -105,6 +112,8 @@ class Database:
             self.conn.execute("ALTER TABLE emails ADD COLUMN spam_reason TEXT")
         if "transferred_at" not in columns:
             self.conn.execute("ALTER TABLE emails ADD COLUMN transferred_at TIMESTAMP")
+        if "embedding" not in columns:
+            self.conn.execute("ALTER TABLE emails ADD COLUMN embedding BLOB")
 
         self.conn.commit()
 
@@ -361,3 +370,82 @@ class Database:
             """
         ).fetchall()
         return [(row["classification"], row["count"]) for row in rows]
+
+    # --- Embedding support ---
+
+    def get_embedding(self, message_id: str) -> bytes | None:
+        """Get the stored embedding BLOB for an email, or None."""
+        row = self.conn.execute(
+            "SELECT embedding FROM emails WHERE message_id = ?", (message_id,)
+        ).fetchone()
+        if row and row["embedding"] is not None:
+            return bytes(row["embedding"])
+        return None
+
+    def set_embedding(self, message_id: str, blob: bytes) -> None:
+        """Store the embedding BLOB for an email."""
+        self.conn.execute(
+            "UPDATE emails SET embedding = ? WHERE message_id = ?",
+            (blob, message_id),
+        )
+        self.conn.commit()
+
+    def get_embeddings_by_classification(self, classification: str) -> list[tuple[str, bytes]]:
+        """Return [(message_id, embedding_blob), ...] for all classified emails with embeddings."""
+        rows = self.conn.execute(
+            """
+            SELECT message_id, embedding FROM emails
+            WHERE classification = ? AND embedding IS NOT NULL AND is_spam = 0
+            """,
+            (classification,),
+        ).fetchall()
+        return [(row["message_id"], bytes(row["embedding"])) for row in rows]
+
+    def get_all_classifications_with_embeddings(self) -> list[str]:
+        """Return distinct classification values that have at least one embedding."""
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT classification FROM emails
+            WHERE classification IS NOT NULL AND embedding IS NOT NULL AND is_spam = 0
+            """
+        ).fetchall()
+        return [row["classification"] for row in rows]
+
+    def get_emails_missing_embeddings(self) -> list[Email]:
+        """Get classified emails that have no embedding yet."""
+        rows = self.conn.execute(
+            """
+            SELECT * FROM emails
+            WHERE classification IS NOT NULL
+            AND embedding IS NULL
+            AND is_spam = 0
+            """
+        ).fetchall()
+        return [self._row_to_email(row) for row in rows]
+
+    # --- Centroid support ---
+
+    def upsert_centroid(self, folder: str, blob: bytes, sample_count: int) -> None:
+        """Insert or replace a folder centroid."""
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO folder_centroids (folder, centroid, sample_count, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (folder, blob, sample_count, datetime.now()),
+        )
+        self.conn.commit()
+
+    def get_all_centroids(self) -> dict[str, tuple[bytes, int]]:
+        """Return {folder: (centroid_blob, sample_count)} for all stored centroids."""
+        rows = self.conn.execute(
+            "SELECT folder, centroid, sample_count FROM folder_centroids"
+        ).fetchall()
+        return {row["folder"]: (bytes(row["centroid"]), row["sample_count"]) for row in rows}
+
+    def delete_centroid(self, folder: str) -> None:
+        """Remove the centroid for a folder (forces recompute on next use)."""
+        self.conn.execute(
+            "DELETE FROM folder_centroids WHERE folder = ?", (folder,)
+        )
+        self.conn.commit()

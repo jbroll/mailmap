@@ -7,9 +7,11 @@ import logging
 from datetime import datetime
 
 from ..categories import get_category_descriptions, load_categories
+from ..classifier import HybridClassifier
 from ..config import Config
 from ..database import Database, Email
-from ..imap_client import EmailMessage, ImapListener, ImapMailbox
+from ..embedding import EmbeddingClient
+from ..imap_client import ImapClient, ImapListener
 from ..llm import OllamaClient
 
 logger = logging.getLogger("mailmap")
@@ -26,36 +28,32 @@ class EmailProcessor:
         self.config = config
         self.db = db
         self.move = move
-        self._queue: asyncio.Queue[EmailMessage] = asyncio.Queue()
-        self._mailbox: ImapMailbox | None = None
+        self._queue: asyncio.Queue[dict] = asyncio.Queue()
+        self._client: ImapClient | None = None
 
-    def _get_mailbox(self) -> ImapMailbox:
+    def _get_client(self) -> ImapClient:
         """Get or create IMAP connection for moves."""
-        if self._mailbox is None:
-            self._mailbox = ImapMailbox(self.config.imap)
-            self._mailbox.connect()
-        return self._mailbox
+        if self._client is None:
+            self._client = ImapClient(self.config.imap)
+            self._client.connect()
+        return self._client
 
-    def _reconnect_mailbox(self) -> ImapMailbox:
+    def _reconnect_client(self) -> ImapClient:
         """Force reconnection to IMAP server."""
-        if self._mailbox is not None:
-            self._mailbox.disconnect()
-            self._mailbox = None
-        return self._get_mailbox()
+        if self._client is not None:
+            self._client.disconnect()
+            self._client = None
+        return self._get_client()
 
-    def _move_to_folder(self, message: EmailMessage, folder: str) -> bool:
-        """Move an email to the destination folder with retry on failure.
-
-        Returns:
-            True if move was successful, False otherwise.
-        """
+    def _move_to_folder(self, message: dict, folder: str) -> bool:
+        """Move an email to the destination folder with retry on failure."""
         last_error = None
 
         for attempt in range(self.MAX_MOVE_RETRIES):
             try:
-                mailbox = self._get_mailbox()
-                mailbox.ensure_folder(folder)
-                mailbox.move_email(message.uid, message.folder, folder)
+                client = self._get_client()
+                client.ensure_folder(folder)
+                client.move_email(message["uid"], message["folder"], folder)
                 logger.info(f"Moved to '{folder}'")
                 return True
             except Exception as e:
@@ -65,12 +63,12 @@ class EmailProcessor:
                     logger.info(f"Reconnecting and retrying in {self.RETRY_DELAY}s...")
                     import time
                     time.sleep(self.RETRY_DELAY)
-                    self._reconnect_mailbox()
+                    self._reconnect_client()
 
         logger.error(f"Failed to move message after {self.MAX_MOVE_RETRIES} attempts: {last_error}")
         return False
 
-    def enqueue(self, message: EmailMessage) -> None:
+    def enqueue(self, message: dict) -> None:
         """Add a message to the processing queue."""
         self._queue.put_nowait(message)
 
@@ -81,19 +79,24 @@ class EmailProcessor:
             try:
                 await self._process_email(message)
             except Exception as e:
-                logger.error(f"Error processing email {message.message_id}: {e}")
+                logger.error(f"Error processing email {message['message_id']}: {e}")
             finally:
                 self._queue.task_done()
 
-    async def _process_email(self, message: EmailMessage) -> None:
+    async def _process_email(self, message: dict) -> None:
         """Process a single email through classification."""
-        logger.info(f"Processing email: {message.subject[:50]}...")
+        subject = message.get("subject", "")
+        from_addr = message.get("from", "")
+        body = message.get("body", "")
+        attachments = message.get("attachments") or None
+
+        logger.info(f"Processing email: {subject[:50]}...")
 
         email_record = Email(
-            message_id=message.message_id,
-            folder_id=message.folder,
-            subject=message.subject,
-            from_addr=message.from_addr,
+            message_id=message["message_id"],
+            folder_id=message["folder"],
+            subject=subject,
+            from_addr=from_addr,
             mbox_path="",  # IMAP emails don't have mbox_path
             processed_at=datetime.now(),
         )
@@ -105,17 +108,22 @@ class EmailProcessor:
             logger.warning("No categories available, skipping classification")
             return
 
-        async with OllamaClient(self.config.ollama) as llm:
-            classification = await llm.classify_email(
-                message.subject,
-                message.from_addr,
-                message.body_text,
-                folder_descriptions,
-                attachments=message.attachments,
+        async with OllamaClient(self.config.ollama) as llm, \
+                EmbeddingClient(self.config.ollama) as embedder:
+            classifier = HybridClassifier(self.config, self.db, llm, embedder)
+            classification = await classifier.classify(
+                {
+                    "subject": subject,
+                    "from": from_addr,
+                    "body": body,
+                    "attachments": attachments,
+                    "message_id": message["message_id"],
+                },
+                folder_descriptions=folder_descriptions,
             )
 
         self.db.update_classification(
-            message.message_id, classification.predicted_folder, classification.confidence
+            message["message_id"], classification.predicted_folder, classification.confidence
         )
         logger.info(
             f"Classified as '{classification.predicted_folder}' (confidence: {classification.confidence:.2f})"
@@ -123,7 +131,7 @@ class EmailProcessor:
 
         # Move to destination folder if enabled
         if self.move and self._move_to_folder(message, classification.predicted_folder):
-            self.db.mark_as_transferred(message.message_id)
+            self.db.mark_as_transferred(message["message_id"])
 
 
 async def run_listener(config: Config, db: Database, *, move: bool = False) -> None:
@@ -135,9 +143,9 @@ async def run_listener(config: Config, db: Database, *, move: bool = False) -> N
 
     listener = ImapListener(config.imap)
 
-    def on_new_email(message: EmailMessage) -> None:
+    def on_new_email(message: dict) -> None:
         """Callback from IMAP thread - must use thread-safe scheduling."""
-        logger.info(f"New email in {message.folder}: {message.subject[:50]}...")
+        logger.info(f"New email in {message['folder']}: {message.get('subject', '')[:50]}...")
         # Schedule enqueue on the event loop (called from thread)
         loop.call_soon_threadsafe(processor.enqueue, message)
 
@@ -153,23 +161,23 @@ async def process_existing_emails(config: Config, db: Database, *, move: bool = 
 
     Returns the number of emails processed.
     """
-    mailbox = ImapMailbox(config.imap)
+    client = ImapClient(config.imap)
     processor = EmailProcessor(config, db, move=move)
     processed = 0
 
     try:
-        mailbox.connect()
+        client.connect()
         logger.info("Checking for existing unclassified emails...")
 
         for folder in config.imap.idle_folders:
-            uids = mailbox.fetch_recent_uids(folder, limit=100)
+            uids = client.fetch_uids(folder, limit=100)
             logger.info(f"Found {len(uids)} recent emails in {folder}")
 
             for uid in uids:
-                msg = mailbox.fetch_email(uid, folder)
+                msg = client.fetch_email(uid, folder)
                 if msg:
                     # Check if already classified
-                    existing = db.get_email(msg.message_id)
+                    existing = db.get_email(msg["message_id"])
                     if existing and existing.classification:
                         continue  # Already classified
 
@@ -178,11 +186,11 @@ async def process_existing_emails(config: Config, db: Database, *, move: bool = 
                         await processor._process_email(msg)
                         processed += 1
                     except Exception as e:
-                        logger.error(f"Error processing {msg.message_id}: {e}")
+                        logger.error(f"Error processing {msg['message_id']}: {e}")
 
         logger.info(f"Processed {processed} existing emails")
     finally:
-        mailbox.disconnect()
+        client.disconnect()
 
     return processed
 

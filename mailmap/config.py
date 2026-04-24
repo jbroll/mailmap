@@ -6,6 +6,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from imap_tool.connection import ImapConfig as ToolImapConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,12 +37,31 @@ class ImapConfig:
         if env_password:
             self.password = env_password
 
+    def to_tool_config(self) -> ToolImapConfig:
+        """Build an imap_tool.ImapConfig for use with imap-tool's ImapClient."""
+        return ToolImapConfig(
+            host=self.host,
+            port=self.port,
+            username=self.username,
+            password=self.password,
+            use_ssl=self.use_ssl,
+        )
+
 
 @dataclass
 class OllamaConfig:
     base_url: str = "http://localhost:11434"
     model: str = "qwen2.5:14b"
+    embed_model: str = "nomic-embed-text"
     timeout_seconds: int = 300  # 5 minutes for large batches
+
+
+@dataclass
+class EmbeddingConfig:
+    enabled: bool = True
+    min_similarity: float = 0.55   # below this → LLM fallback
+    min_margin: float = 0.05       # top1 - top2 must exceed this
+    min_examples: int = 5          # folders with fewer embeddings skip centroid path
 
 
 @dataclass
@@ -144,6 +165,7 @@ class Config:
     thunderbird: ThunderbirdConfig = field(default_factory=ThunderbirdConfig)
     websocket: WebSocketConfig = field(default_factory=WebSocketConfig)
     spam: SpamConfig = field(default_factory=SpamConfig)
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
 
 
 def load_config(path: str | Path) -> Config:
@@ -166,6 +188,7 @@ def load_config(path: str | Path) -> Config:
     ollama_config = OllamaConfig(
         base_url=ollama_data.get("base_url", "http://localhost:11434"),
         model=ollama_data.get("model", "qwen2.5:7b"),
+        embed_model=ollama_data.get("embed_model", "nomic-embed-text"),
         timeout_seconds=ollama_data.get("timeout_seconds", 120),
     )
 
@@ -202,6 +225,14 @@ def load_config(path: str | Path) -> Config:
         rules=spam_data.get("rules", DEFAULT_SPAM_RULES.copy()),
     )
 
+    embed_data = data.get("embedding", {})
+    embed_config = EmbeddingConfig(
+        enabled=embed_data.get("enabled", True),
+        min_similarity=embed_data.get("min_similarity", 0.55),
+        min_margin=embed_data.get("min_margin", 0.05),
+        min_examples=embed_data.get("min_examples", 5),
+    )
+
     return Config(
         imap=imap_config,
         ollama=ollama_config,
@@ -209,4 +240,5 @@ def load_config(path: str | Path) -> Config:
         thunderbird=tb_config,
         websocket=ws_config,
         spam=spam_config,
+        embedding=embed_config,
     )

@@ -38,7 +38,8 @@ class TestOllamaConfig:
     def test_defaults(self):
         config = OllamaConfig()
         assert config.base_url == "http://localhost:11434"
-        assert config.model == "qwen2.5:7b"
+        assert config.model == "qwen2.5:14b"
+        assert config.embed_model == "nomic-embed-text"
         assert config.timeout_seconds == 300  # Increased for large batch processing
 
 

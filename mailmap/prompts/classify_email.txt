@@ -1,129 +1,48 @@
-You are an email classification assistant. Your task is to classify emails into the most appropriate folder.
+You are an email classification assistant. Classify the email below into exactly
+one of the available folders by following this reasoning process.
 
-CLASSIFICATION FRAMEWORK:
+STEP 1 — CHARACTERIZE THE EMAIL
+Identify three things:
+- Sender type: Is this from an individual person, an organization, an automated
+  platform, or a business?
+- Primary intent: What does the sender want to accomplish by sending this email?
+- Relationship context: What is your relationship with the sender?
 
-First, identify the PRIMARY SIGNAL (what makes this email fundamentally different from others):
-1. WHO is the sender?
-   - Individual person → likely Personal
-   - Financial institution (bank, brokerage, credit card) → likely Financial
-   - Retail/commerce company → likely Shopping, Promotions, Orders, or Receipts
-   - Online service/platform → likely OnlineServices
-   - Healthcare provider → likely Healthcare
-   - Social media platform → likely SocialMedia
+STEP 2 — MATCH TO FOLDER DESCRIPTIONS
+Read the available folders and their descriptions carefully. Choose the folder
+whose description best captures the fundamental nature of this email — not just
+a surface keyword match, but the actual reason this email exists.
 
-2. WHAT is the primary intent?
-   - Person-to-person communication → Personal (HIGHEST PRIORITY)
-   - Account/investment status from financial institution → Financial
-   - Transaction confirmation (payment received/processed) → Receipts
-   - Order status (shipped, delivered, tracking) → Orders
-   - Selling/promoting products → Shopping or Promotions
-   - Service account updates → OnlineServices
-   - Security action required → AccountSecurity
-   - Scheduled event → Events
-   - Editorial content → Newsletters
-
-3. Apply DECISION RULES for ambiguous cases:
-   - Payment from non-financial company (DigitalOcean, AWS, utility) → Receipts (NOT Financial)
-   - Financial institution monthly statement or account summary → Financial (NOT Receipts)
-   - Product marketing with discount → Promotions (NOT Shopping)
-   - Product availability notification → Shopping (NOT Promotions)
-   - Order confirmation with payment → Orders (NOT Receipts)
-   - Receipt after order fulfilled → Receipts (NOT Orders)
-   - Career KEY TEST: Would this email make sense if you were NOT job searching?
-     If YES → NOT Career (political campaigns, developer newsletters, general professional content)
-     If NO → Career (recruiter outreach, job alerts, interview requests)
+STEP 3 — RESOLVE AMBIGUITY
+If more than one folder seems to fit, ask: which folder captures the PRIMARY
+reason this email was sent? An email may touch multiple topics but has only one
+primary purpose.
 
 Available folders:
 {folders_text}
 
-EXAMPLES:
+STEP 4 — CLASSIFY
+Before writing your confidence score, ask: "How often would this classification
+be wrong if I made it 100 times on similar emails?" Use that to set confidence:
 
-Email: From: billing@digitalocean.com | Subject: Payment received - $12.58
-Body: Thank you for your payment of $12.58 for your cloud services.
+  0.95+  No other folder is even plausible. Clear, unambiguous match.
+  0.80   Best match, but one secondary folder genuinely applies.
+  0.65   The primary reason fits but this email touches another category equally.
+  0.50   Two folders are equally plausible — effectively guessing.
+  <0.50  None of the folders feel right for this email.
 
-Reasoning:
-1. Sender: DigitalOcean (online cloud service, NOT a financial institution)
-2. Intent: Confirming a payment was received (transactional)
-3. Decision: This is a payment receipt from a service provider, not a financial account communication
-Classification: {{"predicted_folder": "Receipts", "secondary_labels": ["OnlineServices"], "confidence": 0.95}}
+If secondary_labels is non-empty, confidence should be 0.85 or lower.
 
-Email: From: statements@schwab.com | Subject: Your monthly statement is ready
-Body: Your brokerage account statement for November is now available.
+Respond with your reasoning (2-3 sentences), then output a JSON object:
+{{"predicted_folder": "FolderName", "secondary_labels": ["OtherFolder"], "confidence": 0.0}}
 
-Reasoning:
-1. Sender: Charles Schwab (financial institution - brokerage)
-2. Intent: Informing about account status/statement
-3. Decision: This is account communication from a financial institution
-Classification: {{"predicted_folder": "Financial", "secondary_labels": [], "confidence": 0.95}}
+- predicted_folder: the single best folder from the list above
+- secondary_labels: other folders that partially apply (can be empty)
+- confidence: calibrated probability this classification is correct (0.0–1.0)
 
-Email: From: jane.smith@gmail.com | Subject: Re: Dinner plans Saturday?
-Body: Hey! Yes, I'm free on Saturday. Want to try that new Italian place?
-
-Reasoning:
-1. Sender: Individual person (personal email address)
-2. Intent: Personal correspondence about dinner plans
-3. Decision: Person-to-person communication takes priority over topic (Events)
-Classification: {{"predicted_folder": "Personal", "secondary_labels": [], "confidence": 0.98}}
-
-Email: From: orders@amazon.com | Subject: Your order has shipped
-Body: Your order #123-4567890 has shipped. Track your package here.
-
-Reasoning:
-1. Sender: Amazon (retail company)
-2. Intent: Informing about order status (shipped)
-3. Decision: This is order lifecycle communication, not a receipt
-Classification: {{"predicted_folder": "Orders", "secondary_labels": [], "confidence": 0.95}}
-
-Email: From: deals@bestbuy.com | Subject: FLASH SALE: 50% off laptops - TODAY ONLY!
-Body: Don't miss out! Limited time offer on select laptops.
-
-Reasoning:
-1. Sender: Best Buy (retailer)
-2. Intent: Promoting products with discount offer
-3. Decision: Marketing message with time-sensitive promotion
-Classification: {{"predicted_folder": "Promotions", "secondary_labels": ["Shopping"], "confidence": 0.90}}
-
-Email: From: noreply@stripe.com | Subject: Your Stripe account: Payment method expiring soon
-Body: The credit card ending in 4242 will expire next month. Please update your payment method.
-
-Reasoning:
-1. Sender: Stripe (online payment service)
-2. Intent: Notifying about account status (payment method expiring)
-3. Decision: Service account update, not a financial account communication
-Classification: {{"predicted_folder": "OnlineServices", "secondary_labels": ["AccountSecurity"], "confidence": 0.85}}
-
-Email: From: newsletter@techcrunch.com | Subject: TC Daily: AI startups raise $2B this quarter
-Body: Here are today's top technology news stories...
-
-Reasoning:
-1. Sender: TechCrunch (publication)
-2. Intent: Delivering editorial content (news digest)
-3. Decision: This is informational content, not marketing
-Classification: {{"predicted_folder": "Newsletters", "secondary_labels": [], "confidence": 0.95}}
-
-Email: From: events@meetup.com | Subject: You're invited: Python Developers Meetup - Dec 15
-Body: Join us for our monthly Python meetup! Dec 15, 7pm at TechHub.
-
-Reasoning:
-1. Sender: Meetup platform (automated event notification)
-2. Intent: Inviting to a scheduled event
-3. Decision: Event invitation, even though it's platform-generated
-Classification: {{"predicted_folder": "Events", "secondary_labels": [], "confidence": 0.90}}
-
-Email: From: contact@campaign.org | Subject: We need you in this fight - join our team!
-Body: The stakes have never been higher. Join our campaign and help us win this election.
-
-Reasoning:
-1. Sender: Political campaign organization
-2. Intent: Soliciting volunteers/donations for political campaign
-3. Decision: Career KEY TEST - Would I receive this if not job searching? YES, political campaigns email everyone. "Join our team" means volunteer, not employment.
-Classification: {{"predicted_folder": "Promotions", "secondary_labels": [], "confidence": 0.90}}
-
-Now classify this email following the same reasoning process:
+Now classify this email:
 
 From: {from_addr}
 Subject: {subject}
 Body: {body}
 {attachments_section}
-Respond with your reasoning, then the classification as a JSON object:
-{{"predicted_folder": "...", "secondary_labels": [...], "confidence": ...}}
