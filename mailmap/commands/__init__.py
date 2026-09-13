@@ -1,8 +1,8 @@
 """Command implementations for mailmap CLI."""
 
 from .classify import bulk_classify, run_bulk_classify, transfer_emails
-from .embed import run_embed_command
 from .daemon import EmailProcessor, run_daemon, run_listener
+from .embed import run_embed_command
 from .imap_ops import (
     copy_email_cmd,
     create_folder_cmd,

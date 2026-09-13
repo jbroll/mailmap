@@ -2,11 +2,11 @@
 
 import json
 from dataclasses import asdict, dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class Action(str, Enum):
+class Action(StrEnum):
     """Actions that mailmap can request from the extension."""
     MOVE_MESSAGES = "moveMessages"
     COPY_MESSAGES = "copyMessages"
@@ -21,7 +21,7 @@ class Action(str, Enum):
     PING = "ping"
 
 
-class Event(str, Enum):
+class Event(StrEnum):
     """Events that mailmap pushes to extensions."""
     EMAIL_CLASSIFIED = "emailClassified"
     FOLDER_UPDATED = "folderUpdated"

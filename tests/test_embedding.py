@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import array
 import math
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -12,7 +12,6 @@ from mailmap.config import Config, DatabaseConfig, EmbeddingConfig, ImapConfig, 
 from mailmap.database import Database, Email
 from mailmap.embedding import centroid, cosine, vec_from_bytes, vec_to_bytes
 from mailmap.llm import ClassificationResult
-
 
 # --- Pure math helpers ---
 
@@ -125,7 +124,7 @@ async def test_fast_path_taken(test_db):
     config = _make_config()
 
     # Build centroids.
-    for cls, angle in [("Financial", 2.5), ("Personal", 87.5)]:
+    for cls, _angle in [("Financial", 2.5), ("Personal", 87.5)]:
         rows = test_db.get_embeddings_by_classification(cls)
         vecs = [vec_from_bytes(b) for _, b in rows]
         c = centroid(vecs)
@@ -161,7 +160,7 @@ async def test_llm_fallback_on_low_margin(test_db):
 
     config = _make_config(min_margin=0.5)  # very high margin → always fallback
 
-    for cls, angle in [("Financial", 2.5), ("Personal", 87.5)]:
+    for cls, _angle in [("Financial", 2.5), ("Personal", 87.5)]:
         rows = test_db.get_embeddings_by_classification(cls)
         vecs = [vec_from_bytes(b) for _, b in rows]
         c = centroid(vecs)

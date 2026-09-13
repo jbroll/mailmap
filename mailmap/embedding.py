@@ -29,7 +29,7 @@ def vec_to_bytes(v: array.array) -> bytes:
 
 def cosine(a: array.array, b: array.array) -> float:
     """Cosine similarity between two float32 arrays."""
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0.0 or norm_b == 0.0:
@@ -65,7 +65,7 @@ class EmbeddingClient:
         self.config = config
         self._client: httpx.AsyncClient | None = None
 
-    async def __aenter__(self) -> "EmbeddingClient":
+    async def __aenter__(self) -> EmbeddingClient:
         self._client = httpx.AsyncClient(
             base_url=self.config.base_url,
             timeout=httpx.Timeout(self.config.timeout_seconds),

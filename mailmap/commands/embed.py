@@ -158,7 +158,7 @@ async def _embed_emails(db: Database, embedder: EmbeddingClient, emails) -> None
             logger.warning(f"Batch embedding failed: {e} — skipping batch")
             continue
 
-        for email, blob in zip(batch, blobs):
+        for email, blob in zip(batch, blobs, strict=True):
             db.set_embedding(email.message_id, blob)
 
         done += len(batch)

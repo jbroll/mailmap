@@ -15,6 +15,8 @@ from mailmap.commands.imap_ops import (
 )
 from mailmap.config import Config, DatabaseConfig, ImapConfig, OllamaConfig, ThunderbirdConfig
 from mailmap.email import UnifiedEmail
+
+
 @pytest.fixture
 def config():
     """Create a test configuration."""
