@@ -16,7 +16,7 @@ As you accumulate examples and use `mailmap sync` to pick up manual corrections,
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
-- `imap-tool` checked out at `/home/john/src/imap-tool` (path dependency)
+- `imap-tool`, fetched from GitHub at the commit pinned in `uv.lock` (`uv lock --upgrade-package imap-tool` to move it)
 - Ollama on a GPU host with `qwen3:14b` and `nomic-embed-text` pulled
 - IMAP server with IDLE support
 
