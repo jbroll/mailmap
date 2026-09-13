@@ -1,16 +1,21 @@
-.PHONY: build clean test dev show
+.PHONY: build clean test lint dev show
+
+# Python version on the deploy host; compiled wheels must match it, not the local Python
+VPS_PYTHON ?= 3.14
 
 # Build target for deploy.sh binary_service module
 # Outputs binary to build/mailmap (deploy.sh convention)
 build:
 	@echo "Building mailmap package..."
 
-	# Create build directory structure
+	# Start clean so packages dropped from the lock don't ship
+	rm -rf build
 	mkdir -p build/lib
 
-	# Install Python dependencies to build/lib
-	pip install --target build/lib \
-		imapclient httpx websockets html2text
+	# Install locked runtime dependencies to build/lib
+	uv export --frozen --no-dev --no-emit-project -o build/requirements.txt
+	uv pip install --target build/lib --python-version $(VPS_PYTHON) --python-platform x86_64-unknown-linux-gnu -r build/requirements.txt
+	rm -f build/lib/.lock
 
 	# Copy mailmap package
 	cp -r mailmap build/lib/
@@ -48,11 +53,16 @@ clean:
 	rm -rf *.egg-info
 
 test:
-	pytest tests/ -v
+	uv sync
+	uv run pytest tests/ -v
 
-# Development - install in editable mode
+lint:
+	uv sync
+	uv run ruff check .
+
+# Development - create .venv with runtime and dev dependencies
 dev:
-	pip install -e ".[dev]"
+	uv sync
 
 # Show what will be deployed
 show:
@@ -64,7 +74,7 @@ show:
 
 
 inbox-zero:
-	mailmap classify \
+	uv run mailmap classify \
 		--folder outlook.office365.com:INBOX \
 		--copy \
 		--target-account imap \

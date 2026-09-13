@@ -15,16 +15,19 @@ As you accumulate examples and use `mailmap sync` to pick up manual corrections,
 ## Requirements
 
 - Python 3.11+
+- [uv](https://docs.astral.sh/uv/)
+- `imap-tool` checked out at `/home/john/src/imap-tool` (path dependency)
 - Ollama on a GPU host with `qwen3:14b` and `nomic-embed-text` pulled
 - IMAP server with IDLE support
 
 ## Installation
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -e ".[dev]"
+uv sync                  # creates .venv with runtime and dev dependencies from uv.lock
+uv run mailmap --help
 ```
+
+Run commands with `uv run mailmap ...`, or activate `.venv` in an interactive shell. Change dependencies with `uv add` / `uv add --dev` so `uv.lock` stays in step with `pyproject.toml`.
 
 ## Configuration
 
@@ -323,10 +326,13 @@ Operators: `>=`, `>`, `<=`, `<`, `==`, `!=`, `prefix`, `suffix`, `contains`, `in
 ../deploy.sh/deploy.sh init .     # Full initial deployment with infrastructure
 ```
 
+deploy.sh runs `make`, whose `build` target exports the locked runtime dependencies (`uv export --frozen --no-dev`) and installs them into `build/lib` for the server's Python with `uv pip install --target build/lib --python-version $(VPS_PYTHON)`. `VPS_PYTHON` defaults to `3.14`, the server's Python. Override it (`make VPS_PYTHON=3.15`) when the server's Python changes.
+
 ## Testing
 
 ```bash
-pytest                          # All tests
-pytest tests/test_embedding.py  # Embedding + classifier tests
-pytest -v                       # Verbose
+make test                              # uv sync, then the full suite
+make lint                              # ruff
+uv run pytest tests/test_embedding.py  # Embedding + classifier tests
+uv run pytest -v                       # Verbose
 ```

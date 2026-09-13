@@ -5,8 +5,7 @@ Developer guidance for Claude Code when working with this repository.
 ## Quick Start
 
 ```bash
-source venv/bin/activate
-pip install -e ".[dev]"
+uv sync                         # .venv from uv.lock, dev group included
 
 export MAILMAP_IMAP_USERNAME="your-email@example.com"
 export MAILMAP_IMAP_PASSWORD="your-password"
@@ -15,9 +14,10 @@ export MAILMAP_IMAP_PASSWORD="your-password"
 ## Testing
 
 ```bash
-pytest                          # All tests
-pytest tests/test_database.py   # Specific file
-pytest -v                       # Verbose
+uv run pytest                          # All tests
+uv run pytest tests/test_database.py   # Specific file
+uv run pytest -v                       # Verbose
+uv run ruff check .                    # Lint
 ```
 
 ## Deployment
